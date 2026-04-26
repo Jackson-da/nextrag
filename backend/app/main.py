@@ -1,0 +1,190 @@
+"""FastAPI 应用主入口"""
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, HTMLResponse
+import structlog
+
+from app.config import get_settings
+from app.api import document_router, chat_router, knowledge_router, system_router
+from app.models.schemas import HealthResponse
+from app import __version__
+
+# 配置日志
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.processors.JSONRenderer(),
+    ],
+    wrapper_class=structlog.stdlib.BoundLogger,
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+logger = structlog.get_logger()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    logger.info("应用启动中...", version=__version__)
+    
+    # 启动时执行
+    settings = get_settings()
+    logger.info(
+        "配置加载完成",
+        llm_model=settings.llm_model,
+        embedding_model=settings.embedding_model,
+    )
+    
+    yield
+    
+    # 关闭时执行
+    logger.info("应用关闭中...")
+
+
+# 创建 FastAPI 应用
+settings = get_settings()
+
+app = FastAPI(
+    title="智能文档问答系统",
+    description="基于 RAG 的企业级智能文档问答系统 API",
+    version=__version__,
+    lifespan=lifespan,
+    docs_url=None,  # 禁用默认 docs，使用自定义路由
+    redoc_url=None,
+)
+
+# 配置 CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# 自定义 /docs 路由 - 使用国内 CDN (bootcdn)
+@app.get("/docs", include_in_schema=False)
+async def custom_docs():
+    """自定义 API 文档页面，使用国内 CDN"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>智能文档问答系统 - API 文档</title>
+        <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/swagger-ui/5.11.0/swagger-ui.css">
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://cdn.bootcdn.net/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.js"></script>
+        <script>
+            window.onload = function() {
+                SwaggerUIBundle({
+                    url: "/openapi.json",
+                    dom_id: "#swagger-ui",
+                    deepLinking: true,
+                    presets: [
+                        SwaggerUIBundle.presets.apis,
+                        SwaggerUIBundle.SwaggerUIStandalonePreset
+                    ],
+                    layout: "BaseLayout"
+                });
+            };
+        </script>
+    </body>
+    </html>
+    """)
+
+
+# 全局异常处理
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """全局异常处理器"""
+    logger.error(
+        "请求处理异常",
+        path=request.url.path,
+        method=request.method,
+        error=str(exc),
+    )
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "InternalServerError",
+            "message": "服务器内部错误",
+            "detail": str(exc) if settings.log_level == "DEBUG" else None,
+        }
+    )
+
+
+# 注册路由
+app.include_router(document_router, prefix="/api/v1")
+app.include_router(chat_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")
+app.include_router(system_router, prefix="/api/v1")
+
+
+# 根路由
+@app.get("/", tags=["首页"])
+async def root():
+    """首页"""
+    return {
+        "name": "智能文档问答系统",
+        "version": __version__,
+        "docs": "/docs",
+    }
+
+
+# 健康检查
+@app.get("/health", response_model=HealthResponse, tags=["系统"])
+async def health_check():
+    """健康检查"""
+    from app.services.document_service import get_document_service
+    from app.services.chat_service import get_chat_service
+    
+    try:
+        doc_service = get_document_service()
+        vectorstore_info = await doc_service.get_vectorstore_info()
+        chat_service = get_chat_service()
+        llm_connected = await chat_service.health_check()
+    except Exception as e:
+        logger.warning("健康检查失败", error=str(e))
+        return HealthResponse(
+            status="degraded",
+            version=__version__,
+            llm_connected=False,
+            vectorstore_connected=False,
+            document_count=0,
+        )
+    
+    return HealthResponse(
+        status="healthy",
+        version=__version__,
+        llm_connected=llm_connected,
+        vectorstore_connected=True,
+        document_count=vectorstore_info.get("count", 0),
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.log_level == "DEBUG",
+        log_level=settings.log_level.lower(),
+    )

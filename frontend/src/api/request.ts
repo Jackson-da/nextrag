@@ -1,0 +1,68 @@
+import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
+import { ElMessage } from 'element-plus'
+
+const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+
+const instance: AxiosInstance = axios.create({
+  baseURL,
+  timeout: 60000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
+// 请求拦截器
+instance.interceptors.request.use(
+  (config) => {
+    // 可以在这里添加 token 等认证信息
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// 响应拦截器
+instance.interceptors.response.use(
+  (response) => {
+    return response.data
+  },
+  (error) => {
+    const message = error.response?.data?.detail || error.message || '请求失败'
+    ElMessage.error(message)
+    return Promise.reject(error)
+  }
+)
+
+export const request = {
+  get<T = unknown>(url: string, config?: AxiosRequestConfig) {
+    return instance.get<unknown, T>(url, config)
+  },
+
+  post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
+    return instance.post<unknown, T>(url, data, config)
+  },
+
+  put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
+    return instance.put<unknown, T>(url, data, config)
+  },
+
+  delete<T = unknown>(url: string, config?: AxiosRequestConfig) {
+    return instance.delete<unknown, T>(url, config)
+  },
+
+  upload<T = unknown>(
+    url: string,
+    formData: FormData,
+    config?: AxiosRequestConfig
+  ) {
+    return instance.post<unknown, T>(url, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      ...config,
+    })
+  },
+}
+
+export default request
