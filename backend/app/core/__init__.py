@@ -24,7 +24,7 @@ from app.core.rag_chain import (
     RAGChainBuilder,
     ChatWithHistory,
     create_rag_chain,
-    DEFAULT_SYSTEM_PROMPT,
+    get_default_prompt,
 )
 
 __all__ = [
@@ -49,5 +49,5 @@ __all__ = [
     "RAGChainBuilder",
     "ChatWithHistory",
     "create_rag_chain",
-    "DEFAULT_SYSTEM_PROMPT",
+    "get_default_prompt",
 ]

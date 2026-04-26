@@ -6,8 +6,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 import structlog
 
 from app.config import get_settings
-from app.api import document_router, chat_router, knowledge_router, system_router
-from app.models.schemas import HealthResponse
+from app.api import document_router, chat_router, knowledge_router, system_router, simple_health_router
 from app import __version__
 
 # 配置日志
@@ -130,6 +129,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # 注册路由
+app.include_router(simple_health_router)  # /health - 不带前缀
 app.include_router(document_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
@@ -145,37 +145,6 @@ async def root():
         "version": __version__,
         "docs": "/docs",
     }
-
-
-# 健康检查
-@app.get("/health", response_model=HealthResponse, tags=["系统"])
-async def health_check():
-    """健康检查"""
-    from app.services.document_service import get_document_service
-    from app.services.chat_service import get_chat_service
-    
-    try:
-        doc_service = get_document_service()
-        vectorstore_info = await doc_service.get_vectorstore_info()
-        chat_service = get_chat_service()
-        llm_connected = await chat_service.health_check()
-    except Exception as e:
-        logger.warning("健康检查失败", error=str(e))
-        return HealthResponse(
-            status="degraded",
-            version=__version__,
-            llm_connected=False,
-            vectorstore_connected=False,
-            document_count=0,
-        )
-    
-    return HealthResponse(
-        status="healthy",
-        version=__version__,
-        llm_connected=llm_connected,
-        vectorstore_connected=True,
-        document_count=vectorstore_info.get("count", 0),
-    )
 
 
 if __name__ == "__main__":

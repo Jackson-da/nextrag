@@ -1,21 +1,24 @@
 """RAG 链模块 - 检索增强生成"""
-from typing import Any, AsyncIterator, Optional, Literal
+import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.documents import Document
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import SystemMessage, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
 from langchain_core.language_models import BaseChatModel
 from langchain_deepseek import ChatDeepSeek
-from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain  # type: ignore[import]
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain  # type: ignore[import]
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_community.chat_message_histories import RedisChatMessageHistory
+
+from app.config import get_settings
 
 
-# 默认系统提示词
-DEFAULT_SYSTEM_PROMPT = """你是一个专业的文档问答助手。
+# ==================== 默认提示词 ====================
+
+def _get_default_system_prompt() -> str:
+    """获取默认系统提示词"""
+    return """你是一个专业的文档问答助手。
 
 请遵循以下规则：
 1. 只根据提供的上下文信息回答问题，不要编造信息
@@ -26,8 +29,9 @@ DEFAULT_SYSTEM_PROMPT = """你是一个专业的文档问答助手。
 {context}"""
 
 
-# 历史感知的系统提示词
-CONTEXTUALIZE_Q_SYSTEM_PROMPT = """根据对话历史，将后续问题重写为一个独立的问题。
+def _get_default_contextualize_prompt() -> str:
+    """获取默认历史感知重写提示词"""
+    return """根据对话历史，将后续问题重写为一个独立的问题。
 重写时需要考虑：
 1. 如果用户问题已经足够清晰，直接返回原问题
 2. 如果问题涉及"它"、"这个"、"那"等指代，需要结合历史确定具体指代内容
@@ -41,6 +45,10 @@ CONTEXTUALIZE_Q_SYSTEM_PROMPT = """根据对话历史，将后续问题重写为
 独立问题："""
 
 
+# 提示词获取超时常量（秒）
+TOKEN_QUEUE_TIMEOUT = 1.0
+
+
 class RAGChainBuilder:
     """RAG 链构建器"""
     
@@ -51,14 +59,22 @@ class RAGChainBuilder:
         system_prompt: str | None = None,
         contextualize_q_system_prompt: str | None = None,
     ):
+        settings = get_settings()
+        
         self.llm = llm
         self.retriever = retriever
-        self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
-        self.contextualize_q_system_prompt = (
-            contextualize_q_system_prompt or CONTEXTUALIZE_Q_SYSTEM_PROMPT
+        self.system_prompt = (
+            system_prompt 
+            or settings.rag_system_prompt 
+            or _get_default_system_prompt()
         )
-        self._chain: Optional[Any] = None
-        self._history_aware_retriever: Optional[Any] = None
+        self.contextualize_q_system_prompt = (
+            contextualize_q_system_prompt 
+            or settings.rag_contextualize_prompt 
+            or _get_default_contextualize_prompt()
+        )
+        self._chain: Any | None = None
+        self._history_aware_retriever: Any | None = None
     
     def build(self) -> Any:
         """构建 RAG 链"""
@@ -163,7 +179,7 @@ class StreamingCallbackHandler(AsyncCallbackHandler):
         """获取生成的 tokens"""
         while not self.done or not self.queue.empty():
             try:
-                token = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+                token = await asyncio.wait_for(self.queue.get(), timeout=TOKEN_QUEUE_TIMEOUT)
                 yield token
             except asyncio.TimeoutError:
                 if self.done:
@@ -181,19 +197,26 @@ class ChatWithHistory:
         session_id: str = "default",
         system_prompt: str | None = None,
     ):
+        settings = get_settings()
+        
         self.llm = llm
         self.retriever = retriever
         self.session_id = session_id
-        self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self.system_prompt = (
+            system_prompt 
+            or settings.rag_system_prompt 
+            or _get_default_system_prompt()
+        )
         
         # 初始化消息历史
         if redis_url:
+            from langchain_redis import RedisChatMessageHistory  # type: ignore[import]
             self.message_history = RedisChatMessageHistory(
                 url=redis_url,
                 session_id=session_id,
             )
         else:
-            from langchain.memory import ChatMessageHistory
+            from langchain_community.chat_message_histories import ChatMessageHistory  # type: ignore[import]
             self.message_history = ChatMessageHistory()
         
         # 构建链
@@ -249,21 +272,26 @@ class ChatWithHistory:
 
 def create_rag_chain(
     llm_api_key: str,
-    llm_base_url: str = "https://api.deepseek.com/v1",
-    llm_model: str = "deepseek-chat",
+    llm_base_url: str | None = None,
+    llm_model: str | None = None,
     retriever: Any = None,
-    temperature: float = 0.0,
+    temperature: float | None = None,
     system_prompt: str | None = None,
 ) -> RAGChainBuilder:
     """创建 RAG 链的便捷函数"""
-    import os
+    settings = get_settings()
+    
+    # 使用配置中的默认值
+    base_url = llm_base_url or settings.deepseek_base_url
+    model = llm_model or settings.llm_model
+    temp = temperature if temperature is not None else settings.temperature
     
     # 创建 LLM
     llm = ChatDeepSeek(
-        model=llm_model,
+        model=model,
         api_key=llm_api_key,
-        base_url=llm_base_url,
-        temperature=temperature,
+        base_url=base_url,
+        temperature=temp,
         streaming=True,
     )
     
@@ -275,4 +303,16 @@ def create_rag_chain(
     )
 
 
-import asyncio
+def get_default_prompt(prompt_type: str = "system") -> str:
+    """
+    获取默认提示词
+    
+    Args:
+        prompt_type: 提示词类型，"system" 或 "contextualize"
+    
+    Returns:
+        对应类型的默认提示词
+    """
+    if prompt_type == "contextualize":
+        return _get_default_contextualize_prompt()
+    return _get_default_system_prompt()

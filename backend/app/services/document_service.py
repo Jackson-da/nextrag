@@ -4,7 +4,6 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 from langchain_core.documents import Document
 
 from app.config import get_settings
@@ -176,7 +175,7 @@ class DocumentService:
 
 
 # 全局服务实例（懒加载）
-_document_service: Optional[DocumentService] = None
+_document_service: DocumentService | None = None
 
 
 def get_document_service() -> DocumentService:
