@@ -44,8 +44,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Data & uploads (large/local files)
-backend/data/uploads/
-backend/data/chroma_db/
+backend/data/
 *.sqlite3
 
 # Docs (local documentation)
