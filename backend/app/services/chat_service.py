@@ -1,13 +1,12 @@
 """聊天服务 - RAG 对话"""
 import time
-import asyncio
-from typing import Any, Optional
+from typing import Any
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_deepseek import ChatDeepSeek
 
 from app.config import get_settings
-from app.core.rag_chain import RAGChainBuilder, DEFAULT_SYSTEM_PROMPT
+from app.core.rag_chain import RAGChainBuilder
 from app.core.vectorstore import VectorStoreManager
 
 
@@ -32,8 +31,8 @@ class ChatService:
         self.llm_model = settings.llm_model
         
         # 懒加载
-        self._llm: Optional[ChatDeepSeek] = None
-        self._rag_chain: Optional[RAGChainBuilder] = None
+        self._llm: ChatDeepSeek | None = None
+        self._rag_chain: RAGChainBuilder | None = None
         self._chat_histories: dict[str, list] = {}
     
     @property
@@ -160,7 +159,7 @@ class ChatService:
 
 
 # 全局服务实例（懒加载）
-_chat_service: Optional[ChatService] = None
+_chat_service: ChatService | None = None
 
 
 def get_chat_service() -> ChatService:

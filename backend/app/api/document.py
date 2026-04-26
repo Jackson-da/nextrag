@@ -1,7 +1,6 @@
 """文档管理 API 接口"""
 from typing import Annotated
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
-from fastapi.responses import JSONResponse
 
 from app.models.schemas import (
     DocumentResponse,

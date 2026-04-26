@@ -1,26 +1,33 @@
 """聊天 API 接口"""
-from typing import Annotated, AsyncIterator
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from sse_starlette.sse import EventSourceResponse
 import json
-import asyncio
+import structlog
+import uuid
+from collections.abc import AsyncIterator
+from fastapi import APIRouter, HTTPException
+from sse_starlette.sse import EventSourceResponse
 
 from app.models.schemas import (
     ChatRequest,
     ChatResponse,
-    ErrorResponse,
 )
 from app.services.chat_service import get_chat_service
 
+logger = structlog.get_logger()
 router = APIRouter(prefix="/chat", tags=["问答"])
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """非流式问答"""
-    if not request.question.strip():
-        raise HTTPException(status_code=400, detail="问题不能为空")
+    # 生成请求追踪 ID
+    request_id = str(uuid.uuid4())[:8]
+    
+    logger.info(
+        "收到问答请求",
+        request_id=request_id,
+        session_id=request.session_id,
+        question_length=len(request.question),
+    )
     
     chat_service = get_chat_service()
     
@@ -31,6 +38,14 @@ async def chat(request: ChatRequest):
             stream=False,
         )
         
+        logger.info(
+            "问答请求完成",
+            request_id=request_id,
+            session_id=request.session_id,
+            latency=result.get("latency", 0),
+            sources_count=len(result.get("sources", [])),
+        )
+        
         return ChatResponse(
             answer=result["answer"],
             session_id=result["session_id"],
@@ -39,6 +54,12 @@ async def chat(request: ChatRequest):
         )
     
     except Exception as e:
+        logger.error(
+            "问答请求失败",
+            request_id=request_id,
+            session_id=request.session_id,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=f"问答服务出错: {str(e)}")
 
 
@@ -46,6 +67,7 @@ async def generate_sse_events(
     chat_service,
     question: str,
     session_id: str,
+    request_id: str = "",
 ) -> AsyncIterator[dict]:
     """生成 SSE 事件流"""
     try:
@@ -57,7 +79,19 @@ async def generate_sse_events(
                 "event": event["event"],
                 "data": json.dumps(event["data"], ensure_ascii=False)
             }
+        
+        logger.info(
+            "流式问答完成",
+            request_id=request_id,
+            session_id=session_id,
+        )
     except Exception as e:
+        logger.error(
+            "流式问答失败",
+            request_id=request_id,
+            session_id=session_id,
+            error=str(e),
+        )
         yield {
             "event": "error",
             "data": json.dumps({"error": str(e)}, ensure_ascii=False)
@@ -67,8 +101,14 @@ async def generate_sse_events(
 @router.post("/stream")
 async def stream_chat(request: ChatRequest):
     """流式问答（Server-Sent Events）"""
-    if not request.question.strip():
-        raise HTTPException(status_code=400, detail="问题不能为空")
+    request_id = str(uuid.uuid4())[:8]
+    
+    logger.info(
+        "收到流式问答请求",
+        request_id=request_id,
+        session_id=request.session_id,
+        question_length=len(request.question),
+    )
     
     chat_service = get_chat_service()
     
@@ -77,6 +117,7 @@ async def stream_chat(request: ChatRequest):
             chat_service=chat_service,
             question=request.question,
             session_id=request.session_id,
+            request_id=request_id,
         )
     )
 

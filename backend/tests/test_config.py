@@ -44,7 +44,7 @@ class TestSettings:
         settings = Settings()
         
         assert settings.retrieval_top_k == 5
-        assert settings.temperature == 0.0
+        assert settings.temperature == 0.4
         assert settings.max_tokens == 2000
     
     def test_server_config_defaults(self):

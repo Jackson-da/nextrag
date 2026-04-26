@@ -1,13 +1,10 @@
 """文档加载器模块 - 支持多种文档格式"""
 import os
 from pathlib import Path
-from typing import TypeVar, Type
+from typing import Any, cast
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader, TextLoader
-
-
-T = TypeVar("T")
 
 
 def _try_load_with_encoding(file_path: str) -> list[Document]:
@@ -36,7 +33,7 @@ def _try_load_with_encoding(file_path: str) -> list[Document]:
 class DocumentLoaderFactory:
     """文档加载器工厂"""
 
-    _loaders: dict[str, Type[BaseLoader]] = {
+    _loaders: dict[str, type[BaseLoader]] = {
         ".pdf": PyPDFLoader,
         ".docx": UnstructuredWordDocumentLoader,
         ".doc": UnstructuredWordDocumentLoader,
@@ -45,7 +42,7 @@ class DocumentLoaderFactory:
     }
 
     @classmethod
-    def register(cls, extension: str, loader_class: Type[BaseLoader]) -> None:
+    def register(cls, extension: str, loader_class: type[BaseLoader]) -> None:
         """注册新的加载器"""
         cls._loaders[extension.lower()] = loader_class
 
@@ -59,12 +56,13 @@ class DocumentLoaderFactory:
             raise ValueError(f"不支持的文件格式: {ext}。支持的格式: {supported}")
 
         loader_class = cls._loaders[ext]
-        
+
         # TextLoader 需要明确指定 encoding 参数
         if loader_class == TextLoader:
             return TextLoader(file_path, encoding='utf-8')
-        
-        return loader_class(file_path)
+
+        # 使用 cast 避免泛型类型检查问题
+        return cast(Any, loader_class)(file_path)
 
     @classmethod
     def supported_extensions(cls) -> list[str]:

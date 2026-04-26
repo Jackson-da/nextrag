@@ -1,11 +1,13 @@
 """向量存储模块 - Chroma 向量数据库封装"""
-from typing import Any, Optional
+from typing import Any
+
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from langchain_core.vectorstores import VectorStore
 from langchain_community.vectorstores import Chroma
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+
+from app.config import get_settings
 
 
 class VectorStoreManager:
@@ -14,14 +16,16 @@ class VectorStoreManager:
     def __init__(
         self,
         embedding: Embeddings,
-        persist_directory: str = "./data/chroma_db",
-        collection_name: str = "documents",
+        persist_directory: str | None = None,
+        collection_name: str | None = None,
     ):
+        settings = get_settings()
+        
         self.embedding = embedding
-        self.persist_directory = persist_directory
-        self.collection_name = collection_name
-        self._client: Optional[chromadb.PersistentClient] = None
-        self._vectorstore: Optional[Chroma] = None
+        self.persist_directory = persist_directory or settings.chroma_persist_directory
+        self.collection_name = collection_name or settings.collection_name
+        self._client: chromadb.PersistentClient | None = None
+        self._vectorstore: Chroma | None = None
     
     @property
     def client(self) -> chromadb.PersistentClient:
@@ -64,11 +68,13 @@ class VectorStoreManager:
     def similarity_search(
         self,
         query: str,
-        k: int = 5,
+        k: int | None = None,
         filter: dict[str, Any] | None = None,
         **kwargs
     ) -> list[Document]:
         """相似性搜索"""
+        settings = get_settings()
+        k = k or settings.retrieval_top_k
         return self.vectorstore.similarity_search(
             query=query,
             k=k,
@@ -79,11 +85,13 @@ class VectorStoreManager:
     def similarity_search_with_score(
         self,
         query: str,
-        k: int = 5,
+        k: int | None = None,
         filter: dict[str, Any] | None = None,
         **kwargs
     ) -> list[tuple[Document, float]]:
         """带相似度分数的搜索"""
+        settings = get_settings()
+        k = k or settings.retrieval_top_k
         return self.vectorstore.similarity_search_with_score(
             query=query,
             k=k,
@@ -94,9 +102,13 @@ class VectorStoreManager:
     def similarity_search_with_relevance_scores(
         self,
         query: str,
-        k: int = 5,
+        k: int | None = None,
         **kwargs
     ) -> list[tuple[Document, float]]:
+        """带相关性分数的搜索（分数归一化到 0-1）"""
+        settings = get_settings()
+        k = k or settings.retrieval_top_k
+        docs_with_scores = self.similarity_search_with_score(query, k, **kwargs)
         """带相关性分数的搜索（分数归一化到 0-1）"""
         docs_with_scores = self.similarity_search_with_score(query, k, **kwargs)
         
@@ -154,8 +166,9 @@ class VectorStoreManager:
     @property
     def as_retriever(self):
         """转换为 LangChain Retriever"""
+        settings = get_settings()
         return self.vectorstore.as_retriever(
-            search_kwargs={"k": 5}
+            search_kwargs={"k": settings.retrieval_top_k}
         )
 
 
@@ -165,10 +178,12 @@ class MultiCollectionVectorStore:
     def __init__(
         self,
         embedding: Embeddings,
-        persist_directory: str = "./data/chroma_db",
+        persist_directory: str | None = None,
     ):
+        settings = get_settings()
+        
         self.embedding = embedding
-        self.persist_directory = persist_directory
+        self.persist_directory = persist_directory or settings.chroma_persist_directory
         self._stores: dict[str, VectorStoreManager] = {}
     
     def get_store(self, collection_name: str) -> VectorStoreManager:
@@ -195,8 +210,8 @@ class MultiCollectionVectorStore:
 
 def create_vectorstore(
     embedding: Embeddings,
-    persist_directory: str = "./data/chroma_db",
-    collection_name: str = "documents",
+    persist_directory: str | None = None,
+    collection_name: str | None = None,
 ) -> VectorStoreManager:
     """创建向量存储的便捷函数"""
     return VectorStoreManager(
