@@ -48,6 +48,9 @@ backend/data/uploads/
 backend/data/chroma_db/
 *.sqlite3
 
+# Docs (local documentation)
+docs/
+
 # Coverage
 htmlcov/
 .coverage
