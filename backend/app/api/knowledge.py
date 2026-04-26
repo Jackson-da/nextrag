@@ -155,16 +155,34 @@ async def update_knowledge_base(
 
 @router.delete("/{kb_id}", response_model=DeleteResponse)
 async def delete_knowledge_base(kb_id: str):
-    """删除知识库"""
+    """删除知识库（同时删除关联的文档）"""
     db = get_db()
     try:
         kb = db.query(KnowledgeBaseModel).filter(KnowledgeBaseModel.id == kb_id).first()
         if not kb:
             raise HTTPException(status_code=404, detail="知识库不存在")
 
+        # 查询并删除关联的文档
+        doc_service = get_document_service()
+        documents, _ = await doc_service.list_documents(
+            skip=0,
+            limit=1000,  # 获取所有文档
+            knowledge_base_id=kb_id,
+        )
+
+        # 删除每个关联的文档
+        deleted_doc_count = 0
+        for doc in documents:
+            await doc_service.delete_document(doc["id"])
+            deleted_doc_count += 1
+
+        # 删除知识库记录
         db.delete(kb)
         db.commit()
 
-        return DeleteResponse(success=True, message="知识库删除成功")
+        return DeleteResponse(
+            success=True,
+            message=f"知识库删除成功，同时删除了 {deleted_doc_count} 个关联文档"
+        )
     finally:
         db.close()
