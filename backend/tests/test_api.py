@@ -139,7 +139,7 @@ class TestKnowledgeBaseAPI:
         assert data["description"] == "新描述"
     
     def test_delete_knowledge_base(self, client: TestClient):
-        """测试删除知识库"""
+        """测试删除知识库（验证级联删除关联文档）"""
         # 先创建
         create_response = client.post(
             "/api/v1/knowledge-bases",
@@ -153,6 +153,8 @@ class TestKnowledgeBaseAPI:
         assert delete_response.status_code == 200
         data = delete_response.json()
         assert data["success"] is True
+        # 验证返回消息（会提示删除了多少文档）
+        assert "message" in data
         
         # 确认已删除
         get_response = client.get(f"/api/v1/knowledge-bases/{kb_id}")
