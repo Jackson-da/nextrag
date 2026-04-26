@@ -14,37 +14,6 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from app.config import get_settings
 
 
-# ==================== 默认提示词 ====================
-
-def _get_default_system_prompt() -> str:
-    """获取默认系统提示词"""
-    return """你是一个专业的文档问答助手。
-
-请遵循以下规则：
-1. 只根据提供的上下文信息回答问题，不要编造信息
-2. 如果上下文中没有相关信息，明确告知用户"抱歉，我没有找到相关信息"
-3. 回答要准确、简洁、有条理
-4. 适当引用文档来源，帮助用户理解答案出处
-
-{context}"""
-
-
-def _get_default_contextualize_prompt() -> str:
-    """获取默认历史感知重写提示词"""
-    return """根据对话历史，将后续问题重写为一个独立的问题。
-重写时需要考虑：
-1. 如果用户问题已经足够清晰，直接返回原问题
-2. 如果问题涉及"它"、"这个"、"那"等指代，需要结合历史确定具体指代内容
-3. 保持问题的语义不变
-
-对话历史：
-{chat_history}
-
-用户问题：{input}
-
-独立问题："""
-
-
 # 提示词获取超时常量（秒）
 TOKEN_QUEUE_TIMEOUT = 1.0
 
@@ -63,16 +32,8 @@ class RAGChainBuilder:
         
         self.llm = llm
         self.retriever = retriever
-        self.system_prompt = (
-            system_prompt 
-            or settings.rag_system_prompt 
-            or _get_default_system_prompt()
-        )
-        self.contextualize_q_system_prompt = (
-            contextualize_q_system_prompt 
-            or settings.rag_contextualize_prompt 
-            or _get_default_contextualize_prompt()
-        )
+        self.system_prompt = system_prompt or settings.rag_system_prompt
+        self.contextualize_q_system_prompt = contextualize_q_system_prompt or settings.rag_contextualize_prompt
         self._chain: Any | None = None
         self._history_aware_retriever: Any | None = None
     
@@ -202,11 +163,7 @@ class ChatWithHistory:
         self.llm = llm
         self.retriever = retriever
         self.session_id = session_id
-        self.system_prompt = (
-            system_prompt 
-            or settings.rag_system_prompt 
-            or _get_default_system_prompt()
-        )
+        self.system_prompt = system_prompt or settings.rag_system_prompt
         
         # 初始化消息历史
         if redis_url:
@@ -313,6 +270,7 @@ def get_default_prompt(prompt_type: str = "system") -> str:
     Returns:
         对应类型的默认提示词
     """
+    settings = get_settings()
     if prompt_type == "contextualize":
-        return _get_default_contextualize_prompt()
-    return _get_default_system_prompt()
+        return settings.rag_contextualize_prompt
+    return settings.rag_system_prompt

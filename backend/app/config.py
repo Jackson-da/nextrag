@@ -75,17 +75,38 @@ class Settings(BaseSettings):
     
     # ==================== RAG 配置 ====================
     retrieval_top_k: int = Field(default=5, description="检索返回的最大文档数")
-    temperature: float = Field(default=0.4, description="LLM 温度参数")
+    temperature: float = Field(default=0.7, description="LLM 温度参数")
     max_tokens: int = Field(default=2000, description="LLM 最大输出 Token 数")
     stream: bool = Field(default=True, description="是否启用流式输出")
     
     # ==================== RAG 系统提示词配置 ====================
-    rag_system_prompt: str | None = Field(
-        default=None,
+    rag_system_prompt: str = Field(
+        default=(
+            "你是一个智能文档问答助手，可以基于提供的文档内容回答问题。\n\n"
+            "回答风格：\n"
+            "1. 友好、专业、口语化，像在与用户交流\n"
+            "2. 如果文档中有相关信息，给出详细解答\n"
+            "3. 如果文档信息不足，可以结合常识合理补充\n"
+            "4. 适当引用原文档内容，并用简洁的方式标注来源\n"
+            "5. 回答要清晰有条理，重要的点可以加粗或分点\n\n"
+            "--- 相关文档内容 ---\n"
+            "{context}\n"
+            "--- 回答 ---\n"
+        ),
         description="RAG 系统提示词（支持 {context} 占位符）"
     )
-    rag_contextualize_prompt: str | None = Field(
-        default=None,
+    rag_contextualize_prompt: str = Field(
+        default=(
+            "根据对话历史，将后续问题重写为一个独立的问题。\n"
+            "重写时需要考虑：\n"
+            "1. 如果用户问题已经足够清晰，直接返回原问题\n"
+            "2. 如果问题涉及\"它\"、\"这个\"、\"那\"等指代，需要结合历史确定具体指代内容\n"
+            "3. 保持问题的语义不变。\n\n"
+            "对话历史：\n"
+            "{chat_history}\n\n"
+            "用户问题：{input}\n\n"
+            "独立问题："
+        ),
         description="历史感知重写提示词（支持 {chat_history} 和 {input} 占位符）"
     )
     
