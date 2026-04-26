@@ -28,9 +28,9 @@ class BGEEmbeddings(Embeddings):
         )
 
     
-    def embed_query(self, query: str) -> list[float]:
+    def embed_query(self, text: str) -> list[float]:
         """嵌入单个查询文本"""
-        return self._embedding.embed_query(query)
+        return self._embedding.embed_query(text)
     
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """批量嵌入文档"""
@@ -64,14 +64,14 @@ class JinaEmbeddings(Embeddings):
             "Content-Type": "application/json"
         }
     
-    def embed_query(self, query: str) -> list[float]:
+    def embed_query(self, text: str) -> list[float]:
         """嵌入单个查询文本"""
         response = self._client.post(
             f"{self.base_url}/v1/embeddings",
             headers=self._get_headers(),
             json={
                 "model": self.model,
-                "input": query
+                "input": text
             }
         )
         response.raise_for_status()
