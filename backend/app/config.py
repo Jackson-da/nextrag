@@ -65,7 +65,15 @@ class Settings(BaseSettings):
     # ==================== 服务配置 ====================
     host: str = Field(default="0.0.0.0", description="服务监听地址")
     port: int = Field(default=8000, description="服务监听端口")
+
+    # ==================== 日志配置 ====================
     log_level: str = Field(default="INFO", description="日志级别")
+    log_console: bool = Field(default=True, description="是否输出到控制台")
+    log_file: bool = Field(default=False, description="是否输出到文件")
+    log_file_path: str = Field(default="logs/app.log", description="日志文件路径")
+    log_file_max_bytes: int = Field(default=100 * 1024 * 1024, description="单个日志文件最大大小")
+    log_file_backup_count: int = Field(default=10, description="保留的日志文件数量")
+    log_error_file: bool = Field(default=False, description="是否单独记录错误日志")
     
     # ==================== CORS 配置 ====================
     cors_origins: list[str] = Field(
@@ -75,39 +83,53 @@ class Settings(BaseSettings):
     
     # ==================== RAG 配置 ====================
     retrieval_top_k: int = Field(default=5, description="检索返回的最大文档数")
-    temperature: float = Field(default=0.7, description="LLM 温度参数")
+    temperature: float = Field(default=0.3, description="LLM 温度参数")
     max_tokens: int = Field(default=2000, description="LLM 最大输出 Token 数")
     stream: bool = Field(default=True, description="是否启用流式输出")
     
     # ==================== RAG 系统提示词配置 ====================
     rag_system_prompt: str = Field(
         default=(
-            "你是一个智能文档问答助手，可以基于提供的文档内容回答问题。\n\n"
-            "回答风格：\n"
-            "1. 友好、专业、口语化，像在与用户交流\n"
-            "2. 如果文档中有相关信息，给出详细解答\n"
-            "3. 如果文档信息不足，可以结合常识合理补充\n"
-            "4. 适当引用原文档内容，并用简洁的方式标注来源\n"
-            "5. 回答要清晰有条理，重要的点可以加粗或分点\n\n"
-            "--- 相关文档内容 ---\n"
-            "{context}\n"
-            "--- 回答 ---\n"
+            "你是一个友善的智能助手，可以帮助用户回答各种问题。\n\n"
+            "## 回答原则\n\n"
+            "1. **友好亲切**：像朋友聊天一样自然，避免生硬的机器语气\n"
+            "2. **善用文档**：如果提供了文档内容且与问题相关，详细解答并适当引用\n"
+            "3. **诚实有度**：如果文档信息不足，可以结合常识补充，但不要胡编乱造\n"
+            "4. **积极引导**：当没有相关文档或文档信息不足时，引导用户上传相关文档\n"
+            "5. **通用问题**：对于常识性问题（如天气、计算、一般知识等），直接用你的知识回答\n"
+            "6. **清晰有条理**：回答时可以使用分点、适当加粗让内容更易读\n\n"
+            "## 相关文档内容\n\n"
+            "{context}\n\n"
+            "## 开始回答\n\n"
+            "请根据以上原则和问题，友好地回答用户。"
         ),
-        description="RAG 系统提示词（支持 {context} 占位符）"
+        description="RAG 系统提示词，{context} 占位符会被替换为检索到的文档内容，留空则表示无相关文档"
     )
     rag_contextualize_prompt: str = Field(
         default=(
-            "根据对话历史，将后续问题重写为一个独立的问题。\n"
-            "重写时需要考虑：\n"
-            "1. 如果用户问题已经足够清晰，直接返回原问题\n"
-            "2. 如果问题涉及\"它\"、\"这个\"、\"那\"等指代，需要结合历史确定具体指代内容\n"
-            "3. 保持问题的语义不变。\n\n"
-            "对话历史：\n"
-            "{chat_history}\n\n"
-            "用户问题：{input}\n\n"
+            "根据对话历史，将后续问题重写为一个独立的问题。\n\n"
+            "规则：\n"
+            "1. 如果问题足够清晰，直接返回原问题\n"
+            "2. 如果涉及\"它\"、\"这个\"、\"那\"等指代，结合历史确定具体内容\n"
+            "3. 保持原意不变。\n\n"
+            "对话历史：{chat_history}\n\n"
+            "当前问题：{input}\n\n"
             "独立问题："
         ),
-        description="历史感知重写提示词（支持 {chat_history} 和 {input} 占位符）"
+        description="历史感知重写提示词，{chat_history} 和 {input} 占位符会自动替换"
+    )
+    rag_no_context_prompt: str = Field(
+        default=(
+            "用户问了以下问题：\n{question}\n\n"
+            "目前知识库中没有找到与这个问题直接相关的内容。\n\n"
+            "请友好地回复用户：\n"
+            "1. 先说明知识库暂时没有相关内容，语气轻松自然\n"
+            "2. 建议用户可以上传什么类型的文档来丰富知识库\n"
+            "3. 尝试用你的知识给出有帮助的回答，但要说明这是基于通用知识的回答\n"
+            "4. 鼓励用户上传相关文档，态度积极友好\n\n"
+            "回复："
+        ),
+        description="无相关文档时的回复提示词，{question} 占位符会被替换为用户问题"
     )
     
     # ==================== Embedding 高级配置 ====================

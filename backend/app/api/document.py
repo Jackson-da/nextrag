@@ -1,6 +1,7 @@
 """文档管理 API 接口"""
 from typing import Annotated
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request
+import structlog
 
 from app.models.schemas import (
     DocumentResponse,
@@ -13,6 +14,7 @@ from app.services.document_service import get_document_service
 from app.config import get_settings
 
 router = APIRouter(prefix="/documents", tags=["文档管理"])
+logger = structlog.get_logger()
 
 
 @router.post(
@@ -26,12 +28,15 @@ async def upload_document(
     knowledge_base_id: Annotated[str | None, Form(description="知识库 ID")] = None,
 ):
     """上传文档并自动处理"""
+    logger.info("文档上传请求", filename=file.filename, kb_id=knowledge_base_id)
+    
     settings = get_settings()
     
     # 检查文件扩展名
     if file.filename:
         ext = "." + file.filename.split(".")[-1].lower()
         if ext not in settings.allowed_extensions:
+            logger.warning("不支持的文件格式", filename=file.filename, ext=ext)
             raise HTTPException(
                 status_code=400,
                 detail=f"不支持的文件格式。支持的格式: {', '.join(settings.allowed_extensions)}"
@@ -40,6 +45,7 @@ async def upload_document(
     # 检查文件大小
     content = await file.read()
     if len(content) > settings.max_file_size:
+        logger.warning("文件过大", filename=file.filename, size=len(content))
         raise HTTPException(
             status_code=400,
             detail=f"文件过大。最大支持 {settings.max_file_size // (1024 * 1024)}MB"
@@ -55,10 +61,13 @@ async def upload_document(
     )
     
     if result["status"] == "failed":
+        logger.error("文档处理失败", filename=file.filename, error=result.get("error"))
         raise HTTPException(
             status_code=500,
             detail=f"文档处理失败: {result.get('error', '未知错误')}"
         )
+    
+    logger.info("文档上传成功", doc_id=result["id"], chunk_count=result["chunk_count"])
     
     return UploadResponse(
         document_id=result["id"],
@@ -82,16 +91,21 @@ async def list_documents(
         knowledge_base_id=knowledge_base_id,
     )
     
+    logger.info("获取文档列表", skip=skip, limit=limit, total=total, kb_id=knowledge_base_id)
+    
     return DocumentListResponse(total=total, items=items)
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(document_id: str):
     """获取文档详情"""
+    logger.info("获取文档详情", doc_id=document_id)
+    
     doc_service = get_document_service()
     doc = await doc_service.get_document(document_id)
     
     if not doc:
+        logger.warning("文档不存在", doc_id=document_id)
         raise HTTPException(status_code=404, detail="文档不存在")
     
     return doc
@@ -100,11 +114,16 @@ async def get_document(document_id: str):
 @router.delete("/{document_id}", response_model=DeleteResponse)
 async def delete_document(document_id: str):
     """删除文档"""
+    logger.info("删除文档", doc_id=document_id)
+    
     doc_service = get_document_service()
     success = await doc_service.delete_document(document_id)
     
     if not success:
+        logger.warning("文档不存在，无法删除", doc_id=document_id)
         raise HTTPException(status_code=404, detail="文档不存在")
+    
+    logger.info("文档删除成功", doc_id=document_id)
     
     return DeleteResponse(success=True, message="文档删除成功")
 
@@ -112,6 +131,9 @@ async def delete_document(document_id: str):
 @router.get("/vectorstore/info")
 async def get_vectorstore_info():
     """获取向量库信息"""
+    logger.info("获取向量库信息")
+    
     doc_service = get_document_service()
     info = await doc_service.get_vectorstore_info()
+    
     return info
