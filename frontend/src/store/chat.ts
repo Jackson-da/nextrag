@@ -15,8 +15,8 @@ export const useChatStore = defineStore('chat', () => {
   // 当前会话 ID
   const currentSessionId = ref<string>('')
 
-  // 当前知识库 ID
-  const currentKnowledgeBaseId = ref<string>('')
+  // 当前知识库 ID（null 表示全局检索）
+  const currentKnowledgeBaseId = ref<string | null>(null)
 
   // 所有会话
   const sessions = ref<ChatSession[]>([])
@@ -174,6 +174,11 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // 设置当前知识库
+  function setKnowledgeBase(kbId: string | null) {
+    currentKnowledgeBaseId.value = kbId
+  }
+
   return {
     // 状态
     currentSessionId,
@@ -193,5 +198,6 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     deleteSession,
     init,
+    setKnowledgeBase,
   }
 })
