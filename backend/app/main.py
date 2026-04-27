@@ -6,52 +6,45 @@ from fastapi.responses import JSONResponse, HTMLResponse
 import structlog
 
 from app.config import get_settings
+from app.core.logging import setup_logging, get_logger
+from app.middleware.logging import LoggingMiddleware
 from app.api import document_router, chat_router, knowledge_router, system_router, simple_health_router
 from app import __version__
-
-# 配置日志
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    cache_logger_on_first_use=True,
-)
-
-logger = structlog.get_logger()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    logger = get_logger()
     logger.info("应用启动中...", version=__version__)
-    
+
     # 启动时执行
     settings = get_settings()
     logger.info(
         "配置加载完成",
         llm_model=settings.llm_model,
         embedding_model=settings.embedding_model,
+        log_console=settings.log_console,
+        log_file=settings.log_file,
     )
-    
+
     yield
-    
+
     # 关闭时执行
     logger.info("应用关闭中...")
 
 
 # 创建 FastAPI 应用
 settings = get_settings()
+
+# 初始化日志
+setup_logging(
+    level=settings.log_level,
+    console=settings.log_console,
+    file=settings.log_file,
+    file_path=settings.log_file_path,
+    error_file=settings.log_error_file,
+)
 
 app = FastAPI(
     title="智能文档问答系统",
@@ -61,6 +54,9 @@ app = FastAPI(
     docs_url=None,  # 禁用默认 docs，使用自定义路由
     redoc_url=None,
 )
+
+# 注册请求日志中间件
+app.add_middleware(LoggingMiddleware)
 
 # 配置 CORS
 app.add_middleware(

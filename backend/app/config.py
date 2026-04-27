@@ -65,7 +65,15 @@ class Settings(BaseSettings):
     # ==================== 服务配置 ====================
     host: str = Field(default="0.0.0.0", description="服务监听地址")
     port: int = Field(default=8000, description="服务监听端口")
+
+    # ==================== 日志配置 ====================
     log_level: str = Field(default="INFO", description="日志级别")
+    log_console: bool = Field(default=True, description="是否输出到控制台")
+    log_file: bool = Field(default=False, description="是否输出到文件")
+    log_file_path: str = Field(default="logs/app.log", description="日志文件路径")
+    log_file_max_bytes: int = Field(default=100 * 1024 * 1024, description="单个日志文件最大大小")
+    log_file_backup_count: int = Field(default=10, description="保留的日志文件数量")
+    log_error_file: bool = Field(default=False, description="是否单独记录错误日志")
     
     # ==================== CORS 配置 ====================
     cors_origins: list[str] = Field(
