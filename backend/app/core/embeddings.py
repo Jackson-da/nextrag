@@ -165,7 +165,13 @@ def create_embeddings(
         raise ValueError(f"不支持的 Embedding 类型: {embedding_type}")
 
 
-# 默认的 BGE 中文 Embedding
+# 默认的 BGE 中文 Embedding（单例缓存）
+_default_embeddings_instance: BGEEmbeddings | None = None
+
+
 def get_default_embeddings() -> BGEEmbeddings:
-    """获取默认的 BGE Embedding 模型"""
-    return BGEEmbeddings()
+    """获取默认的 BGE Embedding 模型（单例模式，避免重复加载）"""
+    global _default_embeddings_instance
+    if _default_embeddings_instance is None:
+        _default_embeddings_instance = BGEEmbeddings()
+    return _default_embeddings_instance

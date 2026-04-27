@@ -32,7 +32,7 @@ class ChatService:
         
         # 懒加载
         self._llm: ChatDeepSeek | None = None
-        self._rag_chain: RAGChainBuilder | None = None
+        self._rag_chains: dict[str | None, RAGChainBuilder] = {}  # 按 kb_id 缓存
         self._chat_histories: dict[str, list] = {}
     
     @property
@@ -68,6 +68,15 @@ class ChatService:
             )
         return self._rag_chain
     
+    def _get_rag_chain(self, kb_id: str | None = None) -> RAGChainBuilder:
+        """获取或创建 RAG 链（按 kb_id 缓存）"""
+        if kb_id not in self._rag_chains:
+            self._rag_chains[kb_id] = RAGChainBuilder(
+                llm=self.llm,
+                kb_id=kb_id,
+            )
+        return self._rag_chains[kb_id]
+    
     async def chat(
         self,
         question: str,
@@ -89,11 +98,8 @@ class ChatService:
         # 获取对话历史
         chat_history = self._chat_histories.get(session_id, [])
         
-        # 创建带 kb_id 过滤的 RAG 链
-        rag_chain = RAGChainBuilder(
-            llm=self.llm,
-            kb_id=kb_id,
-        )
+        # 获取缓存的 RAG 链
+        rag_chain = self._get_rag_chain(kb_id)
         
         # 调用 RAG 链
         result = await rag_chain.ainvoke(
@@ -142,11 +148,8 @@ class ChatService:
         # 获取对话历史
         chat_history = self._chat_histories.get(session_id, [])
         
-        # 创建带 kb_id 过滤的 RAG 链
-        rag_chain = RAGChainBuilder(
-            llm=self.llm,
-            kb_id=kb_id,
-        )
+        # 获取缓存的 RAG 链
+        rag_chain = self._get_rag_chain(kb_id)
         
         # 流式调用
         full_answer = ""

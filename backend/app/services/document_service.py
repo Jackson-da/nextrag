@@ -99,10 +99,13 @@ class DocumentService:
                 # 分割文档
                 chunks = self.text_splitter.split_documents(documents)
 
-                # 添加文档 ID 到元数据
+                # 添加文档 ID 和知识库 ID 到元数据
                 for i, chunk in enumerate(chunks):
                     chunk.metadata["document_id"] = doc_id
                     chunk.metadata["chunk_index"] = i
+                    # 添加 kb_id 用于知识库过滤
+                    if knowledge_base_id:
+                        chunk.metadata["kb_id"] = knowledge_base_id
 
                 # 存入向量库
                 ids = [f"{doc_id}_{i}" for i in range(len(chunks))]

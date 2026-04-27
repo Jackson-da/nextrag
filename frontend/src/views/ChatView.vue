@@ -4,12 +4,21 @@
     <header class="chat-header">
       <div class="header-left">
         <h1 class="page-title">智能问答</h1>
-        <el-tag v-if="currentKnowledgeBaseName" type="success" size="small">
-          当前知识库：{{ currentKnowledgeBaseName }}
-        </el-tag>
-        <el-tag v-else type="info" size="small">
-          全局检索
-        </el-tag>
+        <el-select
+          v-model="selectedKnowledgeBaseId"
+          placeholder="选择知识库"
+          class="knowledge-base-select"
+          clearable
+          @change="handleKnowledgeBaseChange"
+        >
+          <el-option label="全部知识库（全局检索）" :value="null" />
+          <el-option
+            v-for="kb in knowledgeBaseStore.knowledgeBases"
+            :key="kb.id"
+            :label="kb.name"
+            :value="kb.id"
+          />
+        </el-select>
       </div>
       <div class="header-actions">
         <el-button :icon="Plus" circle @click="handleNewChat" />
@@ -117,23 +126,29 @@ const knowledgeBaseStore = useKnowledgeBaseStore()
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 
-// 当前知识库名称
-const currentKnowledgeBaseName = computed(() => {
-  if (chatStore.currentKnowledgeBaseId) {
-    const kb = knowledgeBaseStore.knowledgeBases.find(
-      (kb) => kb.id === chatStore.currentKnowledgeBaseId
-    )
-    return kb?.name || ''
+// 下拉选中的知识库 ID
+const selectedKnowledgeBaseId = ref<string | null>(null)
+
+// 监听 store 变化，同步 selectedKnowledgeBaseId
+watch(
+  () => chatStore.currentKnowledgeBaseId,
+  (newValue) => {
+    selectedKnowledgeBaseId.value = newValue
   }
-  return ''
-})
+)
+
+// 切换知识库
+function handleKnowledgeBaseChange(kbId: string | null) {
+  chatStore.setKnowledgeBase(kbId)
+}
 
 // 从路由参数获取知识库 ID
 watch(
   () => route.query.knowledgeBaseId,
   (newKbId) => {
     if (newKbId && typeof newKbId === 'string') {
-      chatStore.currentKnowledgeBaseId = newKbId
+      selectedKnowledgeBaseId.value = newKbId
+      chatStore.setKnowledgeBase(newKbId)
       // 如果还没加载知识库列表，先加载
       if (knowledgeBaseStore.knowledgeBases.length === 0) {
         knowledgeBaseStore.fetchKnowledgeBases()
@@ -142,6 +157,15 @@ watch(
   },
   { immediate: true }
 )
+
+// 初始化时加载知识库列表
+onMounted(async () => {
+  chatStore.init()
+  // 如果还没加载知识库列表，先加载
+  if (knowledgeBaseStore.knowledgeBases.length === 0) {
+    await knowledgeBaseStore.fetchKnowledgeBases()
+  }
+})
 
 const inputPlaceholder = computed(() => {
   return chatStore.hasMessages ? '输入问题...' : '请先上传文档，然后输入问题...'
@@ -160,7 +184,7 @@ async function handleSend() {
   if (!text || chatStore.loading) return
 
   inputText.value = ''
-  await chatStore.sendMessage(text, chatStore.currentKnowledgeBaseId)
+  await chatStore.sendMessage(text, chatStore.currentKnowledgeBaseId ?? undefined)
 
   // 滚动到底部
   await nextTick()
@@ -191,10 +215,6 @@ async function handleClearChat() {
     // 取消操作
   }
 }
-
-onMounted(() => {
-  chatStore.init()
-})
 </script>
 
 <style scoped>
@@ -224,6 +244,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.knowledge-base-select {
+  width: 220px;
 }
 
 .header-actions {

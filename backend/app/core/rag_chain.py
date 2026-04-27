@@ -39,7 +39,8 @@ class RAGChainBuilder:
         self.contextualize_q_system_prompt = contextualize_q_system_prompt or settings.rag_contextualize_prompt
         self.no_context_prompt = settings.rag_no_context_prompt
         self._chain: Any | None = None
-        self._history_aware_retriever: Any | None = None
+        self._retriever: Any | None = None  # 缓存检索器
+        self._history_aware_retriever: Any | None = None  # 缓存历史感知检索器
         self._embedding: Any | None = None
     
     def build(self) -> Any:
@@ -47,8 +48,9 @@ class RAGChainBuilder:
         if self._chain is not None:
             return self._chain
         
-        # 获取检索器（支持 kb_id 过滤）
-        retriever = self._get_retriever()
+        # 获取检索器（支持 kb_id 过滤，只构建一次）
+        if self._retriever is None:
+            self._retriever = self._get_retriever()
         
         # 构建历史感知检索器（简化版本）
         history_prompt = ChatPromptTemplate.from_messages([
@@ -58,7 +60,7 @@ class RAGChainBuilder:
         ])
         self._history_aware_retriever = create_history_aware_retriever(
             llm=self.llm,
-            retriever=retriever,
+            retriever=self._retriever,
             prompt=history_prompt,
         )
         
@@ -185,10 +187,10 @@ class RAGChainBuilder:
         """异步流式调用 RAG 链"""
         try:
             # 确保链已构建
-            if self._history_aware_retriever is None:
+            if self._chain is None:
                 self.build()
             
-            # 先检索文档
+            # 先检索文档（使用历史感知检索器）
             retrieved_docs = await self._history_aware_retriever.ainvoke(
                 {"input": input, "chat_history": chat_history or []}
             )
