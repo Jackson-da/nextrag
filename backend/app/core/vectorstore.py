@@ -109,8 +109,6 @@ class VectorStoreManager:
         settings = get_settings()
         k = k or settings.retrieval_top_k
         docs_with_scores = self.similarity_search_with_score(query, k, **kwargs)
-        """带相关性分数的搜索（分数归一化到 0-1）"""
-        docs_with_scores = self.similarity_search_with_score(query, k, **kwargs)
         
         # 计算相关性分数
         if not docs_with_scores:
