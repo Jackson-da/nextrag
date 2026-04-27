@@ -165,10 +165,31 @@ class VectorStoreManager:
     
     @property
     def as_retriever(self):
-        """转换为 LangChain Retriever"""
+        """转换为 LangChain Retriever（全局检索）"""
         settings = get_settings()
         return self.vectorstore.as_retriever(
             search_kwargs={"k": settings.retrieval_top_k}
+        )
+    
+    def get_retriever(self, kb_id: str | None = None):
+        """
+        获取检索器，支持按知识库过滤
+        
+        Args:
+            kb_id: 知识库 ID，None 表示全局检索
+            
+        Returns:
+            配置好的检索器
+        """
+        settings = get_settings()
+        search_kwargs = {"k": settings.retrieval_top_k}
+        
+        # 如果指定了知识库，添加过滤条件
+        if kb_id:
+            search_kwargs["filter"] = {"kb_id": kb_id}
+        
+        return self.vectorstore.as_retriever(
+            search_kwargs=search_kwargs
         )
 
 

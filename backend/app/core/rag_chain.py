@@ -12,6 +12,7 @@ from langchain_classic.chains.combine_documents import create_stuff_documents_ch
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
 from app.config import get_settings
+from app.core.vectorstore import VectorStoreManager
 
 
 # 提示词获取超时常量（秒）
@@ -24,24 +25,30 @@ class RAGChainBuilder:
     def __init__(
         self,
         llm: BaseChatModel,
-        retriever: Any,
+        retriever: Any = None,
         system_prompt: str | None = None,
         contextualize_q_system_prompt: str | None = None,
+        kb_id: str | None = None,
     ):
         settings = get_settings()
         
         self.llm = llm
         self.retriever = retriever
+        self.kb_id = kb_id  # 知识库 ID，用于过滤
         self.system_prompt = system_prompt or settings.rag_system_prompt
         self.contextualize_q_system_prompt = contextualize_q_system_prompt or settings.rag_contextualize_prompt
         self.no_context_prompt = settings.rag_no_context_prompt
         self._chain: Any | None = None
         self._history_aware_retriever: Any | None = None
+        self._embedding: Any | None = None
     
     def build(self) -> Any:
         """构建 RAG 链"""
         if self._chain is not None:
             return self._chain
+        
+        # 获取检索器（支持 kb_id 过滤）
+        retriever = self._get_retriever()
         
         # 构建历史感知检索器（简化版本）
         history_prompt = ChatPromptTemplate.from_messages([
@@ -51,7 +58,7 @@ class RAGChainBuilder:
         ])
         self._history_aware_retriever = create_history_aware_retriever(
             llm=self.llm,
-            retriever=self.retriever,
+            retriever=retriever,
             prompt=history_prompt,
         )
         
@@ -98,6 +105,25 @@ class RAGChainBuilder:
         prompt = self.no_context_prompt.format(question=question)
         response = self.llm.invoke([HumanMessage(content=prompt)])
         return response.content
+    
+    def _get_embedding(self):
+        """获取 embedding 模型"""
+        if self._embedding is None:
+            from app.core.embeddings import get_embedding_model
+            self._embedding = get_embedding_model()
+        return self._embedding
+    
+    def _get_retriever(self) -> Any:
+        """获取检索器，支持按知识库过滤"""
+        if self.retriever is not None:
+            # 使用外部传入的检索器
+            return self.retriever
+        
+        # 创建带 kb_id 过滤的检索器
+        vectorstore = VectorStoreManager(
+            embedding=self._get_embedding()
+        )
+        return vectorstore.get_retriever(kb_id=self.kb_id)
     
     def invoke(
         self,
