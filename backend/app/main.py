@@ -44,6 +44,8 @@ setup_logging(
     file=settings.log_file,
     file_path=settings.log_file_path,
     error_file=settings.log_error_file,
+    file_max_bytes=settings.log_file_max_bytes,
+    file_backup_count=settings.log_file_backup_count,
 )
 
 app = FastAPI(

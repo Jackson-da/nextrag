@@ -3,7 +3,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import SystemMessage, BaseMessage
+from langchain_core.messages import SystemMessage, BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.language_models import BaseChatModel
 from langchain_deepseek import ChatDeepSeek
@@ -34,6 +34,7 @@ class RAGChainBuilder:
         self.retriever = retriever
         self.system_prompt = system_prompt or settings.rag_system_prompt
         self.contextualize_q_system_prompt = contextualize_q_system_prompt or settings.rag_contextualize_prompt
+        self.no_context_prompt = settings.rag_no_context_prompt
         self._chain: Any | None = None
         self._history_aware_retriever: Any | None = None
     
@@ -81,6 +82,23 @@ class RAGChainBuilder:
             self.build()
         return self._chain
     
+    def _has_context(self, result: dict[str, Any]) -> bool:
+        """检查检索结果是否有有效上下文"""
+        docs = result.get("context", [])
+        if not docs:
+            return False
+        # 检查文档内容是否为空或只有空白
+        for doc in docs:
+            if doc.page_content and doc.page_content.strip():
+                return True
+        return False
+    
+    def _build_no_context_response(self, question: str) -> str:
+        """构建无上下文时的响应"""
+        prompt = self.no_context_prompt.format(question=question)
+        response = self.llm.invoke([HumanMessage(content=prompt)])
+        return response.content
+    
     def invoke(
         self,
         input: str,
@@ -88,10 +106,21 @@ class RAGChainBuilder:
         **kwargs
     ) -> dict[str, Any]:
         """同步调用 RAG 链"""
-        return self.chain.invoke(
+        result = self.chain.invoke(
             {"input": input, "chat_history": chat_history or []},
             **kwargs
         )
+        
+        # 检查是否有有效上下文
+        if not self._has_context(result):
+            answer = self._build_no_context_response(input)
+            return {
+                "answer": answer,
+                "context": [],
+                "sources": [],
+            }
+        
+        return result
     
     async def ainvoke(
         self,
@@ -100,10 +129,26 @@ class RAGChainBuilder:
         **kwargs
     ) -> dict[str, Any]:
         """异步调用 RAG 链"""
-        return await self.chain.ainvoke(
+        result = await self.chain.ainvoke(
             {"input": input, "chat_history": chat_history or []},
             **kwargs
         )
+        
+        # 检查是否有有效上下文
+        if not self._has_context(result):
+            loop = asyncio.get_event_loop()
+            answer = await loop.run_in_executor(
+                None,
+                self._build_no_context_response,
+                input
+            )
+            return {
+                "answer": answer,
+                "context": [],
+                "sources": [],
+            }
+        
+        return result
     
     async def astream(
         self,
@@ -113,6 +158,30 @@ class RAGChainBuilder:
     ) -> AsyncIterator[str]:
         """异步流式调用 RAG 链"""
         try:
+            # 确保链已构建
+            if self._history_aware_retriever is None:
+                self.build()
+            
+            # 先检索文档
+            retrieved_docs = await self._history_aware_retriever.ainvoke(
+                {"input": input, "chat_history": chat_history or []}
+            )
+            
+            # 检查检索结果
+            has_docs = any(doc.page_content and doc.page_content.strip() for doc in retrieved_docs)
+            
+            if not has_docs:
+                # 无相关文档，生成友好回复
+                loop = asyncio.get_event_loop()
+                answer = await loop.run_in_executor(
+                    None,
+                    self._build_no_context_response,
+                    input
+                )
+                yield answer
+                return
+            
+            # 有文档，使用标准流程
             async for chunk in self.chain.astream(
                 {"input": input, "chat_history": chat_history or []},
                 **kwargs
@@ -120,9 +189,7 @@ class RAGChainBuilder:
                 if "answer" in chunk:
                     yield chunk["answer"]
         except Exception as e:
-            # 检索失败时，返回错误提示
-            error_msg = f"检索服务出错: {str(e)}"
-            yield error_msg
+            yield f"检索服务出错: {str(e)}"
 
 
 class StreamingCallbackHandler(AsyncCallbackHandler):
@@ -164,6 +231,7 @@ class ChatWithHistory:
         self.retriever = retriever
         self.session_id = session_id
         self.system_prompt = system_prompt or settings.rag_system_prompt
+        self.no_context_prompt = settings.rag_no_context_prompt
         
         # 初始化消息历史
         if redis_url:
@@ -192,6 +260,18 @@ class ChatWithHistory:
             history_messages_key="chat_history",
         )
     
+    def _has_context(self, docs: list) -> bool:
+        """检查是否有有效上下文"""
+        if not docs:
+            return False
+        return any(doc.page_content and doc.page_content.strip() for doc in docs)
+    
+    def _build_no_context_response(self, question: str) -> str:
+        """构建无上下文时的响应"""
+        prompt = self.no_context_prompt.format(question=question)
+        response = self.llm.invoke([HumanMessage(content=prompt)])
+        return response.content
+    
     def chat(self, question: str) -> dict[str, Any]:
         """聊天（同步）"""
         config = {"configurable": {"session_id": self.session_id}}
@@ -201,9 +281,19 @@ class ChatWithHistory:
             config=config
         )
         
+        # 检查是否有有效上下文
+        docs = response.get("context", [])
+        if not self._has_context(docs):
+            answer = self._build_no_context_response(question)
+            return {
+                "answer": answer,
+                "context": [],
+                "chat_history": self.message_history.messages,
+            }
+        
         return {
             "answer": response["answer"],
-            "context": response.get("context", []),
+            "context": docs,
             "chat_history": self.message_history.messages,
         }
     
@@ -216,9 +306,24 @@ class ChatWithHistory:
             config=config
         )
         
+        # 检查是否有有效上下文
+        docs = response.get("context", [])
+        if not self._has_context(docs):
+            loop = asyncio.get_event_loop()
+            answer = await loop.run_in_executor(
+                None,
+                self._build_no_context_response,
+                question
+            )
+            return {
+                "answer": answer,
+                "context": [],
+                "chat_history": self.message_history.messages,
+            }
+        
         return {
             "answer": response["answer"],
-            "context": response.get("context", []),
+            "context": docs,
             "chat_history": self.message_history.messages,
         }
     
