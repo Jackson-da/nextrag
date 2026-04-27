@@ -15,6 +15,9 @@ export const useChatStore = defineStore('chat', () => {
   // 当前会话 ID
   const currentSessionId = ref<string>('')
 
+  // 当前知识库 ID
+  const currentKnowledgeBaseId = ref<string>('')
+
   // 所有会话
   const sessions = ref<ChatSession[]>([])
 
@@ -75,12 +78,20 @@ export const useChatStore = defineStore('chat', () => {
     sources.value = []
   }
 
-  async function sendMessage(question: string): Promise<void> {
+  async function sendMessage(
+    question: string,
+    knowledgeBaseId?: string
+  ): Promise<void> {
     if (!question.trim() || loading.value) return
 
     // 如果没有当前会话，创建一个新会话
     if (!currentSessionId.value) {
       createSession()
+    }
+
+    // 更新当前知识库 ID
+    if (knowledgeBaseId) {
+      currentKnowledgeBaseId.value = knowledgeBaseId
     }
 
     loading.value = true
@@ -108,7 +119,8 @@ export const useChatStore = defineStore('chat', () => {
 
       for await (const chunk of streamChatWithFetch(
         question,
-        currentSessionId.value
+        currentSessionId.value,
+        knowledgeBaseId || currentKnowledgeBaseId.value
       )) {
         fullContent += chunk
         // 更新助手消息内容
@@ -165,6 +177,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     // 状态
     currentSessionId,
+    currentKnowledgeBaseId,
     sessions,
     messages,
     sources,
