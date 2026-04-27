@@ -109,8 +109,8 @@ class RAGChainBuilder:
     def _get_embedding(self):
         """获取 embedding 模型"""
         if self._embedding is None:
-            from app.core.embeddings import get_embedding_model
-            self._embedding = get_embedding_model()
+            from app.core.embeddings import get_default_embeddings
+            self._embedding = get_default_embeddings()
         return self._embedding
     
     def _get_retriever(self) -> Any:
