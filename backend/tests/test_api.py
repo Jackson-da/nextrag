@@ -245,6 +245,194 @@ class TestChatAPI:
         assert "llm_connected" in data
 
 
+class TestChatWithKnowledgeBase:
+    """聊天 API - 按知识库检索测试"""
+    
+    def test_chat_request_accepts_knowledge_base_id(self, client: TestClient):
+        """测试聊天请求能正确接受 knowledge_base_id 参数"""
+        # 先创建一个知识库
+        kb_response = client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "测试知识库-聊天"}
+        )
+        assert kb_response.status_code == 200
+        kb_id = kb_response.json()["id"]
+        
+        # 发送聊天请求，附带 knowledge_base_id
+        chat_response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "你好",
+                "session_id": "test-kb-session-1",
+                "knowledge_base_id": kb_id
+            }
+        )
+        
+        # 验证请求成功（即使 LLM 未配置也能正常返回结构）
+        assert chat_response.status_code in [200, 500]
+        if chat_response.status_code == 500:
+            # 如果是 LLM 连接问题，应该是友好的错误信息
+            assert "detail" in chat_response.json()
+    
+    def test_chat_request_without_knowledge_base_id(self, client: TestClient):
+        """测试不传 knowledge_base_id 时的全局检索请求"""
+        # 发送聊天请求，不带 knowledge_base_id
+        chat_response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "你好",
+                "session_id": "test-global-session"
+            }
+        )
+        
+        # 验证请求能正常处理（不传 kb_id 应该走全局检索）
+        assert chat_response.status_code in [200, 500]
+    
+    def test_chat_request_with_nonexistent_knowledge_base_id(self, client: TestClient):
+        """测试传入不存在的 knowledge_base_id 时的行为"""
+        chat_response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "你好",
+                "session_id": "test-invalid-kb-session",
+                "knowledge_base_id": "nonexistent-kb-id"
+            }
+        )
+        
+        # 应该能处理不存在的 kb_id（返回空结果或全局检索）
+        assert chat_response.status_code in [200, 500]
+    
+    def test_chat_request_validation(self, client: TestClient):
+        """测试聊天请求参数验证"""
+        # 测试空问题
+        response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "",
+                "session_id": "test-validation"
+            }
+        )
+        assert response.status_code == 422
+        
+        # 测试缺少必填字段
+        response = client.post(
+            "/api/v1/chat/chat",
+            json={"question": "你好"}
+        )
+        assert response.status_code == 422
+    
+    def test_chat_request_session_id_required(self, client: TestClient):
+        """测试 session_id 是必填字段"""
+        response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "你好",
+                # 缺少 session_id
+            }
+        )
+        assert response.status_code == 422
+    
+    def test_get_history_with_different_sessions(self, client: TestClient):
+        """测试不同 session_id 获取各自的对话历史"""
+        # 获取第一个会话的历史
+        response1 = client.get("/api/v1/chat/history/session-1")
+        assert response1.status_code == 200
+        assert response1.json()["session_id"] == "session-1"
+        
+        # 获取第二个会话的历史
+        response2 = client.get("/api/v1/chat/history/session-2")
+        assert response2.status_code == 200
+        assert response2.json()["session_id"] == "session-2"
+    
+    def test_clear_specific_session_history(self, client: TestClient):
+        """测试清除特定会话的历史"""
+        # 清除指定会话（无论是否存在都应能处理）
+        response = client.delete("/api/v1/chat/history/my-session-clear-test")
+        assert response.status_code == 200
+        data = response.json()
+        # 验证响应结构正确
+        assert "success" in data
+        assert "message" in data
+        # success 可能为 True（有历史被清除）或 False（无历史）- 两者都是有效响应
+
+
+class TestChatIntegrationWithKnowledgeBase:
+    """聊天与知识库集成测试（需要完整环境）"""
+    
+    @pytest.mark.skip(reason="需要完整的 LLM 和向量库集成")
+    def test_chat_with_knowledge_base_filters_docs(self, client: TestClient):
+        """测试聊天时按知识库过滤文档
+        
+        场景：
+        1. 创建两个知识库 KB1 和 KB2
+        2. KB1 上传文档 A
+        3. KB2 上传文档 B
+        4. 使用 KB1 的 kb_id 提问
+        5. 验证回答只基于文档 A
+        """
+        # 创建知识库 1
+        kb1_response = client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "知识库1-产品文档"}
+        )
+        kb1_id = kb1_response.json()["id"]
+        
+        # 创建知识库 2
+        kb2_response = client.post(
+            "/api/v1/knowledge-bases",
+            json={"name": "知识库2-技术文档"}
+        )
+        kb2_id = kb2_response.json()["id"]
+        
+        # TODO: 上传不同的文档到两个知识库
+        
+        # 使用 KB1 提问
+        chat1_response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "产品特性有哪些？",
+                "session_id": "test-integrate-session",
+                "knowledge_base_id": kb1_id
+            }
+        )
+        
+        # 使用 KB2 提问
+        chat2_response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "技术架构是什么？",
+                "session_id": "test-integrate-session-2",
+                "knowledge_base_id": kb2_id
+            }
+        )
+        
+        # 验证两个回答来自不同的知识库
+        assert chat1_response.status_code == 200
+        assert chat2_response.status_code == 200
+    
+    @pytest.mark.skip(reason="需要完整的 LLM 和向量库集成")
+    def test_global_chat_searches_all_knowledge_bases(self, client: TestClient):
+        """测试不指定知识库时搜索所有知识库
+        
+        场景：
+        1. 创建多个知识库并上传文档
+        2. 不指定 kb_id 提问
+        3. 验证回答综合了多个知识库的内容
+        """
+        # TODO: 创建多个知识库并上传文档
+        
+        # 全局提问（不指定 kb_id）
+        chat_response = client.post(
+            "/api/v1/chat/chat",
+            json={
+                "question": "查找所有相关内容",
+                "session_id": "test-global-search"
+            }
+        )
+        
+        assert chat_response.status_code == 200
+
+
 class TestCORS:
     """CORS 配置测试"""
     

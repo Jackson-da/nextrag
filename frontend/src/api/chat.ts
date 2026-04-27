@@ -76,7 +76,8 @@ export const chatApi = {
 // 使用 fetch 实现流式请求（更可靠）
 export async function* streamChatWithFetch(
   question: string,
-  sessionId: string
+  sessionId: string,
+  knowledgeBaseId?: string
 ): AsyncGenerator<string> {
   const response = await fetch('/api/v1/chat/stream', {
     method: 'POST',
@@ -86,6 +87,7 @@ export async function* streamChatWithFetch(
     body: JSON.stringify({
       question,
       session_id: sessionId,
+      knowledge_base_id: knowledgeBaseId || undefined,
       stream: true,
     }),
   })

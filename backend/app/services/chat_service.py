@@ -73,16 +73,30 @@ class ChatService:
         question: str,
         session_id: str = "default",
         stream: bool = True,
+        kb_id: str | None = None,
         **kwargs
     ) -> dict[str, Any]:
-        """处理聊天请求"""
+        """处理聊天请求
+        
+        Args:
+            question: 用户问题
+            session_id: 会话 ID
+            stream: 是否流式输出（未使用，保留接口）
+            kb_id: 知识库 ID，None 表示全局检索
+        """
         start_time = time.time()
         
         # 获取对话历史
         chat_history = self._chat_histories.get(session_id, [])
         
+        # 创建带 kb_id 过滤的 RAG 链
+        rag_chain = RAGChainBuilder(
+            llm=self.llm,
+            kb_id=kb_id,
+        )
+        
         # 调用 RAG 链
-        result = await self.rag_chain.ainvoke(
+        result = await rag_chain.ainvoke(
             input=question,
             chat_history=chat_history,
         )
@@ -115,15 +129,28 @@ class ChatService:
         self,
         question: str,
         session_id: str = "default",
+        kb_id: str | None = None,
         **kwargs
     ):
-        """流式聊天"""
+        """流式聊天
+        
+        Args:
+            question: 用户问题
+            session_id: 会话 ID
+            kb_id: 知识库 ID，None 表示全局检索
+        """
         # 获取对话历史
         chat_history = self._chat_histories.get(session_id, [])
         
+        # 创建带 kb_id 过滤的 RAG 链
+        rag_chain = RAGChainBuilder(
+            llm=self.llm,
+            kb_id=kb_id,
+        )
+        
         # 流式调用
         full_answer = ""
-        async for token in self.rag_chain.astream(
+        async for token in rag_chain.astream(
             input=question,
             chat_history=chat_history,
         ):

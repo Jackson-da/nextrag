@@ -18,7 +18,11 @@ router = APIRouter(prefix="/chat", tags=["问答"])
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """非流式问答"""
+    """非流式问答
+    
+    Args:
+        request: 包含 question, session_id, knowledge_base_id(可选)
+    """
     # 生成请求追踪 ID
     request_id = str(uuid.uuid4())[:8]
     
@@ -26,6 +30,8 @@ async def chat(request: ChatRequest):
         "收到问答请求",
         request_id=request_id,
         session_id=request.session_id,
+        kb_id=request.knowledge_base_id,
+        kb_filtered=request.knowledge_base_id is not None,
         question_length=len(request.question),
     )
     
@@ -36,6 +42,7 @@ async def chat(request: ChatRequest):
             question=request.question,
             session_id=request.session_id,
             stream=False,
+            kb_id=request.knowledge_base_id,
         )
         
         logger.info(
@@ -67,13 +74,23 @@ async def generate_sse_events(
     chat_service,
     question: str,
     session_id: str,
+    kb_id: str | None,
     request_id: str = "",
 ) -> AsyncIterator[dict]:
-    """生成 SSE 事件流"""
+    """生成 SSE 事件流
+    
+    Args:
+        chat_service: 聊天服务实例
+        question: 用户问题
+        session_id: 会话 ID
+        kb_id: 知识库 ID
+        request_id: 请求追踪 ID
+    """
     try:
         async for event in chat_service.stream_chat(
             question=question,
             session_id=session_id,
+            kb_id=kb_id,
         ):
             yield {
                 "event": event["event"],
@@ -100,13 +117,19 @@ async def generate_sse_events(
 
 @router.post("/stream")
 async def stream_chat(request: ChatRequest):
-    """流式问答（Server-Sent Events）"""
+    """流式问答（Server-Sent Events）
+    
+    Args:
+        request: 包含 question, session_id, knowledge_base_id(可选)
+    """
     request_id = str(uuid.uuid4())[:8]
     
     logger.info(
         "收到流式问答请求",
         request_id=request_id,
         session_id=request.session_id,
+        kb_id=request.knowledge_base_id,
+        kb_filtered=request.knowledge_base_id is not None,
         question_length=len(request.question),
     )
     
@@ -117,6 +140,7 @@ async def stream_chat(request: ChatRequest):
             chat_service=chat_service,
             question=request.question,
             session_id=request.session_id,
+            kb_id=request.knowledge_base_id,
             request_id=request_id,
         )
     )

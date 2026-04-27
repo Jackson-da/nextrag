@@ -2,7 +2,15 @@
   <div class="chat-view">
     <!-- 顶部栏 -->
     <header class="chat-header">
-      <h1 class="page-title">智能问答</h1>
+      <div class="header-left">
+        <h1 class="page-title">智能问答</h1>
+        <el-tag v-if="currentKnowledgeBaseName" type="success" size="small">
+          当前知识库：{{ currentKnowledgeBaseName }}
+        </el-tag>
+        <el-tag v-else type="info" size="small">
+          全局检索
+        </el-tag>
+      </div>
       <div class="header-actions">
         <el-button :icon="Plus" circle @click="handleNewChat" />
         <el-button
@@ -96,15 +104,44 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed } from 'vue'
+import { ref, onMounted, nextTick, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Plus, Delete, Promotion, User, ChatDotRound } from '@element-plus/icons-vue'
-import { useChatStore } from '@/store'
+import { useChatStore, useKnowledgeBaseStore } from '@/store'
 
+const route = useRoute()
 const chatStore = useChatStore()
+const knowledgeBaseStore = useKnowledgeBaseStore()
 
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
+
+// 当前知识库名称
+const currentKnowledgeBaseName = computed(() => {
+  if (chatStore.currentKnowledgeBaseId) {
+    const kb = knowledgeBaseStore.knowledgeBases.find(
+      (kb) => kb.id === chatStore.currentKnowledgeBaseId
+    )
+    return kb?.name || ''
+  }
+  return ''
+})
+
+// 从路由参数获取知识库 ID
+watch(
+  () => route.query.knowledgeBaseId,
+  (newKbId) => {
+    if (newKbId && typeof newKbId === 'string') {
+      chatStore.currentKnowledgeBaseId = newKbId
+      // 如果还没加载知识库列表，先加载
+      if (knowledgeBaseStore.knowledgeBases.length === 0) {
+        knowledgeBaseStore.fetchKnowledgeBases()
+      }
+    }
+  },
+  { immediate: true }
+)
 
 const inputPlaceholder = computed(() => {
   return chatStore.hasMessages ? '输入问题...' : '请先上传文档，然后输入问题...'
@@ -123,7 +160,7 @@ async function handleSend() {
   if (!text || chatStore.loading) return
 
   inputText.value = ''
-  await chatStore.sendMessage(text)
+  await chatStore.sendMessage(text, chatStore.currentKnowledgeBaseId)
 
   // 滚动到底部
   await nextTick()
@@ -181,6 +218,12 @@ onMounted(() => {
   font-weight: 600;
   color: #1f2937;
   margin: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .header-actions {
