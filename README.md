@@ -49,6 +49,7 @@
 │   ├── app/
 │   │   ├── api/               # API 路由
 │   │   │   ├── chat.py        # 对话 API
+│   │   │   ├── chat_session.py # 会话管理 API
 │   │   │   ├── document.py    # 文档 API
 │   │   │   ├── knowledge.py    # 知识库 API
 │   │   │   └── system.py      # 系统 API
@@ -69,7 +70,10 @@
 ├── frontend/                   # 前端项目
 │   ├── src/
 │   │   ├── api/              # API 调用
+│   │   │   ├── chat.ts         # 对话 API
+│   │   │   ├── chat-session.ts # 会话管理 API
 │   │   ├── components/        # 公共组件
+│   │   │   ├── ChatSidebar.vue # 聊天侧边栏
 │   │   ├── layouts/          # 布局组件
 │   │   ├── router/           # 路由配置
 │   │   ├── store/            # 状态管理
@@ -205,6 +209,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 - [x] 多轮对话支持
 - [x] 历史对话记忆
 
+### 4. 会话管理
+- [x] 创建/删除会话
+- [x] 会话列表查看
+- [x] 会话重命名
+- [x] 消息历史管理
+- [x] 用户会话隔离
+- [x] 关联知识库
+
 ## API 文档
 
 ### 对话 API
@@ -234,6 +246,18 @@ DELETE /api/v1/documents/{id}     # 删除文档
 GET    /api/v1/knowledge-bases           # 获取知识库列表
 POST   /api/v1/knowledge-bases            # 创建知识库
 DELETE /api/v1/knowledge-bases/{id}       # 删除知识库
+```
+
+### 会话管理 API
+
+```
+GET    /api/v1/chat/sessions              # 获取会话列表
+POST   /api/v1/chat/sessions              # 创建会话
+GET    /api/v1/chat/sessions/{id}         # 获取会话详情
+PATCH  /api/v1/chat/sessions/{id}         # 更新会话
+DELETE /api/v1/chat/sessions/{id}         # 删除会话
+GET    /api/v1/chat/sessions/{id}/messages # 获取会话消息
+DELETE /api/v1/chat/sessions/{id}/messages # 清空会话消息
 ```
 
 ## 项目截图
@@ -283,6 +307,9 @@ pytest
 
 # 运行指定测试
 pytest tests/test_api.py
+
+# 运行会话管理测试
+pytest tests/test_chat_session.py -v
 
 # 查看覆盖率
 pytest --cov=app tests/
