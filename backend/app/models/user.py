@@ -1,6 +1,6 @@
 """用户模型"""
 from sqlalchemy import Column, String, DateTime
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models.database import Base
 
@@ -12,7 +12,7 @@ class UserModel(Base):
     id = Column(String(36), primary_key=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         """转换为字典"""
