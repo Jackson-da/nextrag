@@ -51,27 +51,29 @@
       </div>
     </aside>
 
-    <!-- 聊天会话侧边栏 (仅在聊天页面显示) -->
-    <ChatSidebar v-if="showChatSidebar" v-model:visible="chatSidebarVisible" />
-
     <!-- 主内容区 -->
     <main class="main-content">
       <router-view />
     </main>
+
+    <!-- 聊天会话侧边栏 (仅在聊天页面显示，位于右侧) -->
+    <ChatSidebar v-if="showChatSidebar" v-model:visible="chatSidebarVisible" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ChatDotRound, Document, Collection, User, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 import { tokenManager, authApi } from '@/api/auth'
 import ChatSidebar from '@/components/ChatSidebar.vue'
+import { useChatStore } from '@/store/chat'
 
 const router = useRouter()
 const route = useRoute()
+const chatStore = useChatStore()
 
 const navItems = [
   { path: '/chat', label: '智能问答', icon: ChatDotRound },
@@ -122,6 +124,7 @@ async function fetchUserInfo() {
 function handleUserCommand(command: string) {
   if (command === 'logout') {
     tokenManager.removeToken()
+    chatStore.reset() // 清空会话历史
     ElMessage.success('已退出登录')
     router.push('/login')
   }
@@ -158,13 +161,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   background: #f5f7fa;
+  min-width: 0;
 }
-
-/* 当有聊天侧边栏时，主内容区应该是 flex-row */
-.app-container:has(.chat-sidebar:not(.collapsed)) .main-content {
-  flex-direction: row;
-}
-</style>
 
 .sidebar-header {
   padding: 20px;
@@ -256,5 +254,16 @@ onMounted(() => {
 
 .version {
   color: rgba(255, 255, 255, 0.5);
+}
+
+/* 聊天侧边栏样式 - 右侧显示 */
+:deep(.chat-sidebar) {
+  order: 2;
+  border-right: none;
+  border-left: 1px solid #e5e7eb;
+}
+
+:deep(.chat-sidebar.collapsed) {
+  border-left: none;
 }
 </style>

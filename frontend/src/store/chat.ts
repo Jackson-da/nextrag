@@ -292,6 +292,20 @@ export const useChatStore = defineStore('chat', () => {
     currentKnowledgeBaseId.value = kbId
   }
 
+  /**
+   * 重置所有状态（退出登录时调用）
+   */
+  function reset(): void {
+    currentSessionId.value = ''
+    currentKnowledgeBaseId.value = null
+    sessions.value = []
+    messages.value = []
+    sources.value = []
+    loading.value = false
+    streaming.value = false
+    initialized.value = false
+  }
+
   return {
     // 状态
     currentSessionId,
@@ -315,5 +329,6 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     init,
     setKnowledgeBase,
+    reset,
   }
 })

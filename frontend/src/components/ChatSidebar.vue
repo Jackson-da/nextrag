@@ -2,12 +2,21 @@
   <div class="chat-sidebar" :class="{ collapsed: !visible }">
     <!-- 侧边栏头部 -->
     <div class="sidebar-header">
-      <h3>历史对话</h3>
-      <el-button :icon="Plus" circle size="small" @click="handleNewChat" />
+      <h3 v-show="visible">历史对话</h3>
+      <div class="header-actions">
+        <el-button
+          :icon="visible ? 'ArrowRight' : 'ArrowLeft'"
+          circle
+          size="small"
+          @click="toggleSidebar"
+          :title="visible ? '收起侧边栏' : '展开侧边栏'"
+        />
+        <el-button v-show="visible" :icon="Plus" circle size="small" @click="handleNewChat" />
+      </div>
     </div>
 
     <!-- 搜索框 -->
-    <div class="sidebar-search">
+    <div v-show="visible" class="sidebar-search">
       <el-input
         v-model="searchQuery"
         placeholder="搜索对话..."
@@ -18,7 +27,7 @@
     </div>
 
     <!-- 会话列表 -->
-    <div class="sidebar-content">
+    <div v-show="visible" class="sidebar-content">
       <div v-if="filteredSessions.length === 0" class="empty-state">
         <el-icon :size="32"><ChatLineRound /></el-icon>
         <p>{{ searchQuery ? '没有找到匹配的对话' : '暂无历史对话' }}</p>
@@ -58,7 +67,7 @@
     </div>
 
     <!-- 底部操作 -->
-    <div class="sidebar-footer">
+    <div v-show="visible" class="sidebar-footer">
       <el-button type="primary" class="new-chat-btn" @click="handleNewChat">
         <el-icon><Plus /></el-icon>
         新建对话
@@ -91,12 +100,21 @@ const props = defineProps<{
   visible: boolean
 }>()
 
+const emit = defineEmits<{
+  'update:visible': [value: boolean]
+}>()
+
 const chatStore = useChatStore()
 
 const searchQuery = ref('')
 const renameDialogVisible = ref(false)
 const renameSessionId = ref('')
 const newTitle = ref('')
+
+// 切换侧边栏显示/隐藏
+function toggleSidebar() {
+  emit('update:visible', !props.visible)
+}
 
 // 过滤后的会话列表
 const filteredSessions = computed(() => {
@@ -213,7 +231,7 @@ async function handleDelete(sessionId: string) {
   width: 280px;
   height: 100%;
   background: #f7f8fa;
-  border-right: 1px solid #e5e7eb;
+  border-left: 1px solid #e5e7eb;
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
@@ -221,16 +239,22 @@ async function handleDelete(sessionId: string) {
 }
 
 .chat-sidebar.collapsed {
-  width: 0;
-  border-right: none;
+  width: 48px;
+  border-left: none;
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
+  padding: 12px;
   border-bottom: 1px solid #e5e7eb;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .sidebar-header h3 {
@@ -238,6 +262,7 @@ async function handleDelete(sessionId: string) {
   font-size: 16px;
   font-weight: 600;
   color: #1f2937;
+  white-space: nowrap;
 }
 
 .sidebar-search {
