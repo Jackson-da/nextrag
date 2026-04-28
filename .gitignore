@@ -46,9 +46,6 @@ yarn-error.log*
 # Data & uploads (large/local files)
 backend/data/
 
-# Documentation
-docs/
-
 # Coverage
 htmlcov/
 .coverage
