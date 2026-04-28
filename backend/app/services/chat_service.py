@@ -68,14 +68,16 @@ class ChatService:
             )
         return self._rag_chain
     
-    def _get_rag_chain(self, kb_id: str | None = None) -> RAGChainBuilder:
-        """获取或创建 RAG 链（按 kb_id 缓存）"""
-        if kb_id not in self._rag_chains:
-            self._rag_chains[kb_id] = RAGChainBuilder(
+    def _get_rag_chain(self, kb_id: str | None = None, user_id: str | None = None) -> RAGChainBuilder:
+        """获取或创建 RAG 链（按 kb_id 和 user_id 缓存）"""
+        cache_key = f"{kb_id}:{user_id}"
+        if cache_key not in self._rag_chains:
+            self._rag_chains[cache_key] = RAGChainBuilder(
                 llm=self.llm,
                 kb_id=kb_id,
+                user_id=user_id,
             )
-        return self._rag_chains[kb_id]
+        return self._rag_chains[cache_key]
     
     async def chat(
         self,
@@ -83,6 +85,7 @@ class ChatService:
         session_id: str = "default",
         stream: bool = True,
         kb_id: str | None = None,
+        user_id: str | None = None,
         **kwargs
     ) -> dict[str, Any]:
         """处理聊天请求
@@ -92,6 +95,7 @@ class ChatService:
             session_id: 会话 ID
             stream: 是否流式输出（未使用，保留接口）
             kb_id: 知识库 ID，None 表示全局检索
+            user_id: 用户 ID，用于数据隔离
         """
         start_time = time.time()
         
@@ -99,7 +103,7 @@ class ChatService:
         chat_history = self._chat_histories.get(session_id, [])
         
         # 获取缓存的 RAG 链
-        rag_chain = self._get_rag_chain(kb_id)
+        rag_chain = self._get_rag_chain(kb_id, user_id)
         
         # 调用 RAG 链
         result = await rag_chain.ainvoke(
@@ -136,6 +140,7 @@ class ChatService:
         question: str,
         session_id: str = "default",
         kb_id: str | None = None,
+        user_id: str | None = None,
         **kwargs
     ):
         """流式聊天
@@ -144,12 +149,13 @@ class ChatService:
             question: 用户问题
             session_id: 会话 ID
             kb_id: 知识库 ID，None 表示全局检索
+            user_id: 用户 ID，用于数据隔离
         """
         # 获取对话历史
         chat_history = self._chat_histories.get(session_id, [])
         
         # 获取缓存的 RAG 链
-        rag_chain = self._get_rag_chain(kb_id)
+        rag_chain = self._get_rag_chain(kb_id, user_id)
         
         # 流式调用
         full_answer = ""

@@ -52,6 +52,29 @@ class VectorStoreManager:
             )
         return self._vectorstore
     
+    def close(self):
+        """关闭向量存储，释放资源"""
+        if self._vectorstore is not None:
+            try:
+                # Chroma 的 persist_directory 会在适当时机自动保存
+                # 这里主要是清理客户端引用
+                self._vectorstore = None
+            except Exception:
+                pass
+        
+        if self._client is not None:
+            try:
+                # 关闭 Chroma 客户端
+                if hasattr(self._client, 'close'):
+                    self._client.close()
+                self._client = None
+            except Exception:
+                pass
+    
+    def __del__(self):
+        """析构时确保资源被清理"""
+        self.close()
+    
     def add_documents(
         self,
         documents: list[Document],
@@ -155,11 +178,29 @@ class VectorStoreManager:
                 "count": 0,
                 "metadata": {}
             }
+
+    def set_collection_metadata(self, metadata: dict[str, Any]) -> None:
+        """设置集合元数据"""
+        try:
+            collection = self.client.get_collection(self.collection_name)
+            collection.metadata = metadata
+        except Exception:
+            pass
     
     def reset(self) -> None:
         """重置向量库"""
         self.delete_collection()
         self._vectorstore = None
+    
+    def get_user_chunk_count(self, user_id: str) -> int:
+        """获取指定用户的片段数量"""
+        try:
+            collection = self.client.get_collection(self.collection_name)
+            # 使用 where 条件过滤用户
+            results = collection.get(where={"user_id": {"$eq": user_id}})
+            return len(results.get("ids", []))
+        except Exception:
+            return 0
     
     @property
     def as_retriever(self):
@@ -169,12 +210,13 @@ class VectorStoreManager:
             search_kwargs={"k": settings.retrieval_top_k}
         )
     
-    def get_retriever(self, kb_id: str | None = None):
+    def get_retriever(self, kb_id: str | None = None, user_id: str | None = None):
         """
-        获取检索器，支持按知识库过滤
+        获取检索器，支持按知识库和用户过滤
         
         Args:
             kb_id: 知识库 ID，None 表示全局检索
+            user_id: 用户 ID，用于数据隔离
             
         Returns:
             配置好的检索器
@@ -182,9 +224,18 @@ class VectorStoreManager:
         settings = get_settings()
         search_kwargs = {"k": settings.retrieval_top_k}
         
-        # 如果指定了知识库，添加过滤条件
+        # 构建过滤条件 - ChromaDB 多条件需要使用 $and 操作符
+        filter_conditions = []
         if kb_id:
-            search_kwargs["filter"] = {"kb_id": kb_id}
+            filter_conditions.append({"kb_id": {"$eq": kb_id}})
+        if user_id:
+            filter_conditions.append({"user_id": {"$eq": user_id}})
+        
+        if filter_conditions:
+            if len(filter_conditions) == 1:
+                search_kwargs["filter"] = filter_conditions[0]
+            else:
+                search_kwargs["filter"] = {"$and": filter_conditions}
         
         return self.vectorstore.as_retriever(
             search_kwargs=search_kwargs

@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     # ==================== 服务配置 ====================
     host: str = Field(default="0.0.0.0", description="服务监听地址")
     port: int = Field(default=8000, description="服务监听端口")
+    
+    # ==================== JWT 认证配置 ====================
+    jwt_secret_key: str = Field(
+        default="your-secret-key-change-in-production",
+        description="JWT 密钥"
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT 算法")
+    jwt_expire_days: int = Field(default=7, description="Token 过期天数")
 
     # ==================== 日志配置 ====================
     log_level: str = Field(default="INFO", description="日志级别")

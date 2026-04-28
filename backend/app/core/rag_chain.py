@@ -29,12 +29,14 @@ class RAGChainBuilder:
         system_prompt: str | None = None,
         contextualize_q_system_prompt: str | None = None,
         kb_id: str | None = None,
+        user_id: str | None = None,
     ):
         settings = get_settings()
         
         self.llm = llm
         self.retriever = retriever
         self.kb_id = kb_id  # 知识库 ID，用于过滤
+        self.user_id = user_id  # 用户 ID，用于数据隔离
         self.system_prompt = system_prompt or settings.rag_system_prompt
         self.contextualize_q_system_prompt = contextualize_q_system_prompt or settings.rag_contextualize_prompt
         self.no_context_prompt = settings.rag_no_context_prompt
@@ -116,16 +118,16 @@ class RAGChainBuilder:
         return self._embedding
     
     def _get_retriever(self) -> Any:
-        """获取检索器，支持按知识库过滤"""
+        """获取检索器，支持按知识库和用户过滤"""
         if self.retriever is not None:
             # 使用外部传入的检索器
             return self.retriever
         
-        # 创建带 kb_id 过滤的检索器
+        # 创建带 kb_id 和 user_id 过滤的检索器
         vectorstore = VectorStoreManager(
             embedding=self._get_embedding()
         )
-        return vectorstore.get_retriever(kb_id=self.kb_id)
+        return vectorstore.get_retriever(kb_id=self.kb_id, user_id=self.user_id)
     
     def invoke(
         self,

@@ -1,0 +1,14 @@
+# 测试环境临时 requirements
+# 用于修复 langsmith 与 Pydantic 的兼容性问题
+
+# 关键：降级 langsmith 到兼容版本
+langsmith==0.1.147
+
+# 同时降级 langchain 到兼容版本
+langchain==0.1.20
+langchain-core==0.1.52
+langchain-community==0.0.38
+
+# 保持 Pydantic 版本不变
+pydantic>=2.9.0
+pydantic-settings>=2.5.0

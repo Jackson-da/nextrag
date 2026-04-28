@@ -1,7 +1,7 @@
 """知识库 API 接口"""
 import uuid
 from typing import Annotated
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 import structlog
 
 from app.models.schemas import (
@@ -14,6 +14,8 @@ from app.models.schemas import (
 )
 from app.services.document_service import get_document_service
 from app.models.database import KnowledgeBaseModel, init_db, SessionLocal
+from app.api.auth import get_current_user
+from app.models.user import UserModel
 
 router = APIRouter(prefix="/knowledge-bases", tags=["知识库"])
 logger = structlog.get_logger()
@@ -28,9 +30,12 @@ def get_db():
 
 
 @router.post("", response_model=KnowledgeBaseResponse)
-async def create_knowledge_base(request: KnowledgeBaseCreate):
-    """创建知识库"""
-    logger.info("创建知识库", name=request.name)
+async def create_knowledge_base(
+    request: KnowledgeBaseCreate,
+    current_user: UserModel = Depends(get_current_user),
+):
+    """创建知识库（需要登录）"""
+    logger.info("创建知识库", user_id=current_user.id, name=request.name)
     
     db = get_db()
     try:
@@ -38,6 +43,7 @@ async def create_knowledge_base(request: KnowledgeBaseCreate):
 
         kb = KnowledgeBaseModel(
             id=kb_id,
+            user_id=current_user.id,  # 关联用户
             name=request.name,
             description=request.description,
         )
@@ -45,7 +51,7 @@ async def create_knowledge_base(request: KnowledgeBaseCreate):
         db.commit()
         db.refresh(kb)
 
-        logger.info("知识库创建成功", kb_id=kb_id, name=request.name)
+        logger.info("知识库创建成功", kb_id=kb_id, name=request.name, user_id=current_user.id)
         
         return kb.to_dict()
     finally:
@@ -56,14 +62,15 @@ async def create_knowledge_base(request: KnowledgeBaseCreate):
 async def list_knowledge_bases(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    current_user: UserModel = Depends(get_current_user),
 ):
-    """获取知识库列表"""
+    """获取当前用户的知识库列表"""
     db = get_db()
     try:
         doc_service = get_document_service()
 
-        # 查询知识库
-        query = db.query(KnowledgeBaseModel)
+        # 只查询当前用户创建的知识库
+        query = db.query(KnowledgeBaseModel).filter(KnowledgeBaseModel.user_id == current_user.id)
         total = query.count()
         items = query.order_by(KnowledgeBaseModel.created_at.desc()).offset(skip).limit(limit).all()
 
@@ -75,11 +82,12 @@ async def list_knowledge_bases(
                 skip=0,
                 limit=1,
                 knowledge_base_id=kb.id,
+                user_id=current_user.id,  # 只统计当前用户的文档
             )
             kb_dict["document_count"] = doc_count
             result.append(kb_dict)
 
-        logger.info("获取知识库列表", skip=skip, limit=limit, total=total)
+        logger.info("获取知识库列表", user_id=current_user.id, skip=skip, limit=limit, total=total)
         
         return KnowledgeBaseListResponse(total=total, items=result)
     finally:
@@ -91,13 +99,17 @@ async def get_knowledge_base_documents(
     kb_id: str,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    current_user: UserModel = Depends(get_current_user),
 ):
-    """获取知识库关联的文档列表"""
+    """获取知识库关联的文档列表（需要登录，且只能查看自己的知识库）"""
     db = get_db()
     try:
-        kb = db.query(KnowledgeBaseModel).filter(KnowledgeBaseModel.id == kb_id).first()
+        kb = db.query(KnowledgeBaseModel).filter(
+            KnowledgeBaseModel.id == kb_id,
+            KnowledgeBaseModel.user_id == current_user.id  # 验证知识库属于当前用户
+        ).first()
         if not kb:
-            logger.warning("知识库不存在", kb_id=kb_id)
+            logger.warning("知识库不存在或无权访问", kb_id=kb_id, user_id=current_user.id)
             raise HTTPException(status_code=404, detail="知识库不存在")
 
         doc_service = get_document_service()
@@ -105,9 +117,10 @@ async def get_knowledge_base_documents(
             skip=skip,
             limit=limit,
             knowledge_base_id=kb_id,
+            user_id=current_user.id,
         )
 
-        logger.info("获取知识库文档列表", kb_id=kb_id, skip=skip, limit=limit, total=total)
+        logger.info("获取知识库文档列表", kb_id=kb_id, user_id=current_user.id, skip=skip, limit=limit, total=total)
         
         return DocumentListResponse(total=total, items=items)
     finally:
@@ -115,15 +128,21 @@ async def get_knowledge_base_documents(
 
 
 @router.get("/{kb_id}", response_model=KnowledgeBaseResponse)
-async def get_knowledge_base(kb_id: str):
-    """获取知识库详情"""
-    logger.info("获取知识库详情", kb_id=kb_id)
+async def get_knowledge_base(
+    kb_id: str,
+    current_user: UserModel = Depends(get_current_user),
+):
+    """获取知识库详情（需要登录，且只能查看自己的知识库）"""
+    logger.info("获取知识库详情", kb_id=kb_id, user_id=current_user.id)
     
     db = get_db()
     try:
-        kb = db.query(KnowledgeBaseModel).filter(KnowledgeBaseModel.id == kb_id).first()
+        kb = db.query(KnowledgeBaseModel).filter(
+            KnowledgeBaseModel.id == kb_id,
+            KnowledgeBaseModel.user_id == current_user.id  # 验证知识库属于当前用户
+        ).first()
         if not kb:
-            logger.warning("知识库不存在", kb_id=kb_id)
+            logger.warning("知识库不存在或无权访问", kb_id=kb_id, user_id=current_user.id)
             raise HTTPException(status_code=404, detail="知识库不存在")
 
         kb_dict = kb.to_dict()
@@ -134,6 +153,7 @@ async def get_knowledge_base(kb_id: str):
             skip=0,
             limit=1,
             knowledge_base_id=kb_id,
+            user_id=current_user.id,
         )
         kb_dict["document_count"] = doc_count
 
@@ -146,15 +166,19 @@ async def get_knowledge_base(kb_id: str):
 async def update_knowledge_base(
     kb_id: str,
     request: KnowledgeBaseUpdate,
+    current_user: UserModel = Depends(get_current_user),
 ):
-    """更新知识库"""
-    logger.info("更新知识库", kb_id=kb_id, name=request.name, description=request.description)
+    """更新知识库（需要登录，且只能更新自己的知识库）"""
+    logger.info("更新知识库", kb_id=kb_id, user_id=current_user.id, name=request.name, description=request.description)
     
     db = get_db()
     try:
-        kb = db.query(KnowledgeBaseModel).filter(KnowledgeBaseModel.id == kb_id).first()
+        kb = db.query(KnowledgeBaseModel).filter(
+            KnowledgeBaseModel.id == kb_id,
+            KnowledgeBaseModel.user_id == current_user.id  # 验证知识库属于当前用户
+        ).first()
         if not kb:
-            logger.warning("知识库不存在", kb_id=kb_id)
+            logger.warning("知识库不存在或无权访问", kb_id=kb_id, user_id=current_user.id)
             raise HTTPException(status_code=404, detail="知识库不存在")
 
         if request.name is not None:
@@ -165,7 +189,7 @@ async def update_knowledge_base(
         db.commit()
         db.refresh(kb)
 
-        logger.info("知识库更新成功", kb_id=kb_id)
+        logger.info("知识库更新成功", kb_id=kb_id, user_id=current_user.id)
         
         return kb.to_dict()
     finally:
@@ -173,15 +197,21 @@ async def update_knowledge_base(
 
 
 @router.delete("/{kb_id}", response_model=DeleteResponse)
-async def delete_knowledge_base(kb_id: str):
-    """删除知识库（同时删除关联的文档）"""
-    logger.info("删除知识库", kb_id=kb_id)
+async def delete_knowledge_base(
+    kb_id: str,
+    current_user: UserModel = Depends(get_current_user),
+):
+    """删除知识库（需要登录，只能删除自己的知识库，同时删除关联的文档）"""
+    logger.info("删除知识库", kb_id=kb_id, user_id=current_user.id)
     
     db = get_db()
     try:
-        kb = db.query(KnowledgeBaseModel).filter(KnowledgeBaseModel.id == kb_id).first()
+        kb = db.query(KnowledgeBaseModel).filter(
+            KnowledgeBaseModel.id == kb_id,
+            KnowledgeBaseModel.user_id == current_user.id  # 验证知识库属于当前用户
+        ).first()
         if not kb:
-            logger.warning("知识库不存在", kb_id=kb_id)
+            logger.warning("知识库不存在或无权访问", kb_id=kb_id, user_id=current_user.id)
             raise HTTPException(status_code=404, detail="知识库不存在")
 
         # 查询并删除关联的文档
@@ -190,6 +220,7 @@ async def delete_knowledge_base(kb_id: str):
             skip=0,
             limit=1000,  # 获取所有文档
             knowledge_base_id=kb_id,
+            user_id=current_user.id,
         )
 
         # 删除每个关联的文档
@@ -202,7 +233,7 @@ async def delete_knowledge_base(kb_id: str):
         db.delete(kb)
         db.commit()
 
-        logger.info("知识库删除成功", kb_id=kb_id, deleted_doc_count=deleted_doc_count)
+        logger.info("知识库删除成功", kb_id=kb_id, user_id=current_user.id, deleted_doc_count=deleted_doc_count)
         
         return DeleteResponse(
             success=True,

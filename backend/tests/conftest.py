@@ -1,71 +1,95 @@
-"""测试配置和 fixtures"""
-import sys
+"""Pytest 配置文件"""
+from sqlalchemy.orm.session import Session, sessionmaker
+
+
 import os
 from pathlib import Path
 from typing import Generator
+import uuid
+
 import pytest
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
-# 添加项目根目录到 Python 路径
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# 设置测试环境
+os.environ["ENVIRONMENT"] = "development"  # 使用 development 而不是 test
 
-from app.main import app
-from app.config import get_settings
-from app.models.database import Base
+from app.models.database import Base, engine as original_engine
 
 
-# 创建内存数据库用于测试 - 使用 StaticPool 确保所有连接共享同一数据库
-test_engine = create_engine(
-    "sqlite:///:memory:",
+# 创建内存 SQLite 数据库用于测试
+SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
-TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+TestingSessionLocal: sessionmaker[Session] = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-@pytest.fixture(scope="session")
-def test_settings():
-    """测试配置"""
-    return get_settings()
+# 导入所有模型以确保它们被注册到 Base
+from app.models.user import UserModel
+from app.models.database import DocumentModel, KnowledgeBaseModel
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_database():
-    """创建测试数据库表"""
-    # 创建测试数据库表
-    Base.metadata.create_all(bind=test_engine)
-    yield
-    # 测试结束后清理
-    Base.metadata.drop_all(bind=test_engine)
-
-
-@pytest.fixture
-def client() -> Generator[TestClient, None, None]:
-    """FastAPI 测试客户端"""
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture
-def db_session():
-    """数据库会话 - 使用内存数据库，每次测试后回滚"""
-    connection = test_engine.connect()
-    transaction = connection.begin()
-    session = TestSessionLocal(bind=connection)
+@pytest.fixture(scope="function")
+def db_session() -> Generator[Session, None, None]:
+    """创建测试数据库会话"""
+    # 创建所有表
+    Base.metadata.create_all(bind=engine)
     
+    session = TestingSessionLocal()
     try:
         yield session
     finally:
         session.close()
-        transaction.rollback()
-        connection.close()
+        # 测试后删除所有表
+        Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture
-def test_text() -> str:
-    """测试用文本"""
-    return "这是一段测试文本。用于测试文本分割功能。我们需要确保它能正确处理各种边界情况。"
+@pytest.fixture(scope="function")
+def test_user(db_session: Session) -> UserModel:
+    """创建测试用户"""
+    from app.core.security import hash_password
+    
+    user = UserModel(
+        id=str(uuid.uuid4()),
+        username="testuser",
+        password_hash=hash_password("testpassword123")
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture(scope="function")
+def auth_headers(client: TestClient, test_user: UserModel) -> dict:
+    """获取认证请求头"""
+    from app.core.security import create_access_token
+    
+    token = create_access_token(data={"sub": test_user.id})
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(scope="function")
+def client(db_session: Session, test_user: UserModel) -> Generator[TestClient, None, None]:
+    """创建测试客户端"""
+    from app.main import app
+    from app.models.database import get_db
+    
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+    
+    app.dependency_overrides[get_db] = override_get_db
+    
+    with TestClient(app) as test_client:
+        yield test_client
+    
+    app.dependency_overrides.clear()

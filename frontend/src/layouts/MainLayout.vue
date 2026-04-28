@@ -23,6 +23,25 @@
       </nav>
 
       <div class="sidebar-footer">
+        <!-- 用户信息 -->
+        <div class="user-info">
+          <el-dropdown @command="handleUserCommand">
+            <span class="user-dropdown">
+              <el-icon><User /></el-icon>
+              <span class="username">{{ username }}</span>
+              <el-icon class="arrow"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="logout">
+                  <el-icon><SwitchButton /></el-icon>
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+
         <div class="system-info">
           <el-tag :type="healthStatus.type" size="small">
             {{ healthStatus.text }}
@@ -41,8 +60,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ChatDotRound, Document, Collection } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
+import { ChatDotRound, Document, Collection, User, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import request from '@/api/request'
+import { tokenManager, authApi } from '@/api/auth'
+
+const router = useRouter()
 
 const navItems = [
   { path: '/chat', label: '智能问答', icon: ChatDotRound },
@@ -50,6 +74,7 @@ const navItems = [
   { path: '/knowledge-bases', label: '知识库', icon: Collection },
 ]
 
+const username = ref('用户')
 const health = ref({
   status: 'checking',
   version: '',
@@ -76,8 +101,28 @@ async function checkHealth() {
   }
 }
 
+async function fetchUserInfo() {
+  try {
+    const user = await authApi.getCurrentUser()
+    username.value = user.username
+  } catch {
+    // 未登录时不显示用户名
+  }
+}
+
+function handleUserCommand(command: string) {
+  if (command === 'logout') {
+    tokenManager.removeToken()
+    ElMessage.success('已退出登录')
+    router.push('/login')
+  }
+}
+
 onMounted(() => {
   checkHealth()
+  if (tokenManager.isLoggedIn()) {
+    fetchUserInfo()
+  }
 })
 </script>
 
@@ -152,6 +197,37 @@ onMounted(() => {
 .sidebar-footer {
   padding: 16px 20px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.user-info {
+  margin-bottom: 12px;
+}
+
+.user-dropdown {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.user-dropdown:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.username {
+  flex: 1;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arrow {
+  font-size: 12px;
 }
 
 .system-info {

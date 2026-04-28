@@ -8,6 +8,7 @@ langchain>=0.3.0
 langchain-core>=0.3.0
 langchain-community>=0.3.0
 langchain-deepseek>=0.1.0
+langsmith>=0.3.45,<0.5.0  # 兼容版本
 
 # Embeddings
 sentence-transformers>=3.0.0
@@ -23,6 +24,11 @@ unstructured>=0.15.0
 # Data Validation
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
+
+# Authentication
+PyJWT>=2.9.0
+passlib[bcrypt]>=1.7.4
+bcrypt<5.0.0  # passlib兼容版本
 
 # Database
 sqlalchemy>=2.0.0

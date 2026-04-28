@@ -42,6 +42,13 @@ class DocumentService:
             chunk_overlap=settings.chunk_overlap,
             splitter_type="chinese",
         )
+    
+    def close(self):
+        """关闭文档服务，释放资源"""
+        if self.vectorstore is not None:
+            self.vectorstore.close()
+        self.embedding = None
+        self.text_splitter = None
 
     def _get_db(self) -> Session:
         """获取数据库会话"""
@@ -61,6 +68,7 @@ class DocumentService:
         filename: str,
         description: str | None = None,
         knowledge_base_id: str | None = None,
+        user_id: str | None = None,  # 用户关联
     ) -> dict:
         """上传并处理文档"""
         db = self._get_db()
@@ -80,6 +88,7 @@ class DocumentService:
             # 创建文档记录
             doc_model = DocumentModel(
                 id=doc_id,
+                user_id=user_id,  # 用户关联
                 filename=filename,
                 file_path=str(file_path),
                 file_size=len(file_content),
@@ -91,6 +100,10 @@ class DocumentService:
             )
             db.add(doc_model)
             db.commit()
+
+            # 添加用户 ID 到元数据
+            if user_id:
+                self.vectorstore.set_collection_metadata({"user_id": user_id})
 
             try:
                 # 加载文档
@@ -106,6 +119,9 @@ class DocumentService:
                     # 添加 kb_id 用于知识库过滤
                     if knowledge_base_id:
                         chunk.metadata["kb_id"] = knowledge_base_id
+                    # 添加 user_id 用于用户隔离
+                    if user_id:
+                        chunk.metadata["user_id"] = user_id
 
                 # 存入向量库
                 ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
@@ -139,8 +155,9 @@ class DocumentService:
         skip: int = 0,
         limit: int = 20,
         knowledge_base_id: str | None = None,
+        user_id: str | None = None,  # 用户关联
     ) -> tuple[list[dict], int]:
-        """列出文档"""
+        """列出文档（支持用户过滤）"""
         db = self._get_db()
         try:
             query = db.query(DocumentModel)
@@ -148,6 +165,8 @@ class DocumentService:
             # 过滤
             if knowledge_base_id:
                 query = query.filter(DocumentModel.knowledge_base_id == knowledge_base_id)
+            if user_id:
+                query = query.filter(DocumentModel.user_id == user_id)
 
             # 总数
             total = query.count()
@@ -191,9 +210,21 @@ class DocumentService:
         finally:
             db.close()
 
-    async def get_vectorstore_info(self) -> dict:
-        """获取向量库信息"""
-        return self.vectorstore.get_collection_info()
+    async def get_vectorstore_info(self, user_id: str | None = None) -> dict:
+        """获取向量库信息（支持按用户过滤）"""
+        # 获取总片段数
+        collection_info = self.vectorstore.get_collection_info()
+        
+        # 如果指定了用户，统计该用户的片段数
+        if user_id:
+            user_chunk_count = self.vectorstore.get_user_chunk_count(user_id)
+            return {
+                "name": collection_info["name"],
+                "count": user_chunk_count,  # 返回用户自己的片段数
+                "metadata": collection_info["metadata"],
+            }
+        
+        return collection_info
 
 
 # 全局服务实例（懒加载）
