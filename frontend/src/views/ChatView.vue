@@ -6,9 +6,8 @@
         <h1 class="page-title">智能问答</h1>
         <el-select
           v-model="selectedKnowledgeBaseId"
-          placeholder="选择知识库"
+          :placeholder="selectedKnowledgeBaseName"
           class="knowledge-base-select"
-          clearable
           @change="handleKnowledgeBaseChange"
         >
           <el-option label="全部知识库（全局检索）" :value="null" />
@@ -113,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed, watch } from 'vue'
+import { ref, onMounted, onActivated, nextTick, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Plus, Delete, Promotion, User, ChatDotRound } from '@element-plus/icons-vue'
@@ -129,12 +128,24 @@ const messagesContainer = ref<HTMLElement | null>(null)
 // 下拉选中的知识库 ID
 const selectedKnowledgeBaseId = ref<string | null>(null)
 
+// 计算当前选中的知识库名称
+const selectedKnowledgeBaseName = computed(() => {
+  if (selectedKnowledgeBaseId.value === null) {
+    return '全部知识库（全局检索）'
+  }
+  const kb = knowledgeBaseStore.knowledgeBases.find(
+    (k) => k.id === selectedKnowledgeBaseId.value
+  )
+  return kb?.name || '选择知识库'
+})
+
 // 监听 store 变化，同步 selectedKnowledgeBaseId
 watch(
   () => chatStore.currentKnowledgeBaseId,
   (newValue) => {
     selectedKnowledgeBaseId.value = newValue
-  }
+  },
+  { immediate: true }
 )
 
 // 切换知识库
@@ -149,14 +160,43 @@ watch(
     if (newKbId && typeof newKbId === 'string') {
       selectedKnowledgeBaseId.value = newKbId
       chatStore.setKnowledgeBase(newKbId)
-      // 如果还没加载知识库列表，先加载
-      if (knowledgeBaseStore.knowledgeBases.length === 0) {
-        knowledgeBaseStore.fetchKnowledgeBases()
-      }
     }
   },
   { immediate: true }
 )
+
+// 滚动到底部
+async function scrollToBottom() {
+  await nextTick()
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
+// 持续滚动到底部（用于流式回复）
+let scrollObserver: MutationObserver | null = null
+
+function startAutoScroll() {
+  if (!messagesContainer.value || scrollObserver) return
+  
+  scrollObserver = new MutationObserver(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    }
+  })
+  
+  scrollObserver.observe(messagesContainer.value, {
+    childList: true,
+    subtree: true
+  })
+}
+
+function stopAutoScroll() {
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+    scrollObserver = null
+  }
+}
 
 // 初始化时加载知识库列表
 onMounted(async () => {
@@ -165,6 +205,13 @@ onMounted(async () => {
   if (knowledgeBaseStore.knowledgeBases.length === 0) {
     await knowledgeBaseStore.fetchKnowledgeBases()
   }
+  // 初始化时滚动到底部
+  scrollToBottom()
+})
+
+// 每次页面激活时滚动到底部
+onActivated(() => {
+  scrollToBottom()
 })
 
 const inputPlaceholder = computed(() => {
@@ -184,16 +231,17 @@ async function handleSend() {
   if (!text || chatStore.loading) return
 
   inputText.value = ''
-  await chatStore.sendMessage(text, chatStore.currentKnowledgeBaseId ?? undefined)
-
-  // 滚动到底部
-  await nextTick()
-  scrollToBottom()
-}
-
-function scrollToBottom() {
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  
+  // 开始自动滚动
+  startAutoScroll()
+  
+  try {
+    await chatStore.sendMessage(text, chatStore.currentKnowledgeBaseId ?? undefined)
+  } finally {
+    // 停止自动滚动
+    stopAutoScroll()
+    // 最后确保滚动到底部
+    scrollToBottom()
   }
 }
 

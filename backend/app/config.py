@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     # ==================== 服务配置 ====================
     host: str = Field(default="0.0.0.0", description="服务监听地址")
     port: int = Field(default=8000, description="服务监听端口")
+    
+    # ==================== JWT 认证配置 ====================
+    jwt_secret_key: str = Field(
+        default="your-secret-key-change-in-production",
+        description="JWT 密钥"
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT 算法")
+    jwt_expire_days: int = Field(default=7, description="Token 过期天数")
 
     # ==================== 日志配置 ====================
     log_level: str = Field(default="INFO", description="日志级别")
@@ -279,6 +287,22 @@ def get_settings() -> Settings:
     
     # 运行时安全校验
     settings.validate_path_security()
+    
+    # JWT 密钥生产环境检查
+    if settings.is_production and settings.jwt_secret_key == "your-secret-key-change-in-production":
+        import os
+        os.environ.pop("JWT_SECRET_KEY", None)  # 清除环境变量以便重新加载
+        raise ValueError(
+            "生产环境必须设置安全的 JWT_SECRET_KEY！\n"
+            "请设置环境变量或 .env 文件中的 jwt_secret_key"
+        )
+    elif settings.jwt_secret_key == "your-secret-key-change-in-production":
+        import warnings
+        warnings.warn(
+            "警告：使用了默认的 JWT 密钥！\n"
+            "生产环境请设置安全的 jwt_secret_key",
+            UserWarning
+        )
     
     # chunk_overlap 必须小于 chunk_size
     if settings.chunk_overlap >= settings.chunk_size:

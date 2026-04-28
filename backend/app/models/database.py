@@ -24,6 +24,7 @@ class DocumentModel(Base):
     __tablename__ = "documents"
 
     id = Column(String(36), primary_key=True)
+    user_id = Column(String(36), nullable=False, index=True)  # 用户关联
     filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
     file_size = Column(Integer, default=0)
@@ -40,6 +41,7 @@ class DocumentModel(Base):
         """转换为字典"""
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "filename": self.filename,
             "file_path": self.file_path,
             "file_size": self.file_size,
@@ -59,6 +61,7 @@ class KnowledgeBaseModel(Base):
     __tablename__ = "knowledge_bases"
 
     id = Column(String(36), primary_key=True)
+    user_id = Column(String(36), nullable=False, index=True)  # 用户关联
     name = Column(String(100), nullable=False)
     description = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
@@ -68,6 +71,7 @@ class KnowledgeBaseModel(Base):
         """转换为字典"""
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "name": self.name,
             "description": self.description,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -87,3 +91,11 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def close_db():
+    """关闭数据库引擎"""
+    try:
+        engine.dispose()
+    except Exception:
+        pass

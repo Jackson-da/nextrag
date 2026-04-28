@@ -8,7 +8,7 @@ import structlog
 from app.config import get_settings
 from app.core.logging import setup_logging, get_logger
 from app.middleware.logging import LoggingMiddleware
-from app.api import document_router, chat_router, knowledge_router, system_router, simple_health_router
+from app.api import document_router, chat_router, knowledge_router, system_router, simple_health_router, auth_router
 from app import __version__
 
 
@@ -30,8 +30,40 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # 关闭时执行
+    # 关闭时执行 - 清理所有资源
     logger.info("应用关闭中...")
+    
+    try:
+        # 清理全局服务实例
+        from app.services import chat_service as chat_service_module
+        from app.services import document_service as document_service_module
+        
+        # 重置文档服务（先关闭以释放向量库资源）
+        if hasattr(document_service_module, '_document_service'):
+            doc_service = document_service_module._document_service
+            if doc_service is not None:
+                doc_service.close()
+            document_service_module._document_service = None
+            logger.info("文档服务已清理")
+        
+        # 重置聊天服务
+        if hasattr(chat_service_module, '_chat_service'):
+            chat_service_module._chat_service = None
+            logger.info("聊天服务已清理")
+        
+        # 清理依赖注入容器
+        from app.core.container import reset_container
+        reset_container()
+        logger.info("依赖注入容器已重置")
+        
+        # 关闭数据库连接
+        from app.models.database import close_db
+        close_db()
+        logger.info("数据库连接已关闭")
+        
+        logger.info("应用关闭完成")
+    except Exception as e:
+        logger.error("清理资源时出错", error=str(e))
 
 
 # 创建 FastAPI 应用
@@ -109,12 +141,22 @@ async def custom_docs():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理器"""
-    logger.error(
-        "请求处理异常",
-        path=request.url.path,
-        method=request.method,
-        error=str(exc),
-    )
+    try:
+        logger = get_logger()
+        logger.error(
+            "请求处理异常",
+            path=request.url.path,
+            method=request.method,
+            error=str(exc),
+        )
+    except Exception:
+        # 如果logger初始化失败，使用structlog的标准方式
+        structlog.get_logger().error(
+            "请求处理异常",
+            path=request.url.path,
+            method=request.method,
+            error=str(exc),
+        )
     
     return JSONResponse(
         status_code=500,
@@ -132,6 +174,7 @@ app.include_router(document_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 
 
 # 根路由

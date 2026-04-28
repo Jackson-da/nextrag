@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
+import router from '@/router'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
@@ -14,7 +15,11 @@ const instance: AxiosInstance = axios.create({
 // 请求拦截器
 instance.interceptors.request.use(
   (config) => {
-    // 可以在这里添加 token 等认证信息
+    // 添加 Token 到请求头
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -28,6 +33,13 @@ instance.interceptors.response.use(
     return response.data
   },
   (error) => {
+    // 如果是 401 错误，清除 Token 并跳转登录页
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token')
+      router.push('/login')
+      return Promise.reject(error)
+    }
+
     const message = error.response?.data?.detail || error.message || '请求失败'
     ElMessage.error(message)
     return Promise.reject(error)

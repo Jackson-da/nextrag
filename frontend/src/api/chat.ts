@@ -7,50 +7,98 @@ export const chatApi = {
     return request.post<ChatResponse>('/chat/chat', data)
   },
 
-  // 流式问答
+  // 流式问答（使用 fetch 替代 EventSource 以支持认证）
   streamChat(
     data: ChatRequest,
     onMessage: (content: string) => void,
     onDone?: () => void,
     onError?: (error: string) => void
   ) {
-    const eventSource = new EventSource(
-      `/api/v1/chat/stream?question=${encodeURIComponent(data.question)}&session_id=${encodeURIComponent(data.session_id)}`
-    )
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.content) {
-          onMessage(data.content)
+    // 获取 token
+    const token = localStorage.getItem('token')
+    
+    fetch('/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        question: data.question,
+        session_id: data.session_id,
+        knowledge_base_id: data.knowledge_base_id || undefined,
+        stream: true,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('请求失败: ' + response.status)
         }
-      } catch {
-        // 忽略解析错误
+        
+        const reader = response.body?.getReader()
+        if (!reader) {
+          throw new Error('无法读取响应流')
+        }
+        
+        const decoder = new TextDecoder()
+        let buffer = ''
+        
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          
+          buffer += decoder.decode(value, { stream: true })
+          
+          // 处理缓冲区，按行分割
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            const trimmedLine = line.trim()
+            if (!trimmedLine) continue
+            
+            // 解析 SSE data 行
+            if (trimmedLine.startsWith('data:')) {
+              const dataStr = trimmedLine.slice(5).trim()
+              
+              // 跳过 [DONE] 标记
+              if (dataStr === '[DONE]') {
+                onDone?.()
+                return
+              }
+              
+              // 尝试解析 JSON
+              try {
+                const parsed = JSON.parse(dataStr)
+                if (parsed.content) {
+                  onMessage(parsed.content)
+                }
+                if (parsed.error) {
+                  throw new Error(parsed.error)
+                }
+              } catch (parseError) {
+                // 如果不是 JSON，可能是纯文本内容
+                if (dataStr) {
+                  onMessage(dataStr)
+                }
+              }
+            }
+          }
+        }
+        
+        onDone?.()
+      })
+      .catch((error) => {
+        console.error('流式请求错误:', error)
+        onError?.(error.message || '流式响应出错')
+      })
+    
+    // 返回一个对象用于取消请求（如果需要）
+    return {
+      cancel: () => {
+        // fetch 不支持取消，这里仅作接口占位
       }
     }
-
-    eventSource.addEventListener('message', (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.content) {
-          onMessage(data.content)
-        }
-      } catch {
-        // 忽略解析错误
-      }
-    })
-
-    eventSource.addEventListener('done', () => {
-      eventSource.close()
-      onDone?.()
-    })
-
-    eventSource.addEventListener('error', (event) => {
-      eventSource.close()
-      onError?.('流式响应出错')
-    })
-
-    return eventSource
   },
 
   // 获取对话历史
@@ -79,10 +127,14 @@ export async function* streamChatWithFetch(
   sessionId: string,
   knowledgeBaseId?: string
 ): AsyncGenerator<string> {
+  // 获取 token
+  const token = localStorage.getItem('token')
+  
   const response = await fetch('/api/v1/chat/stream', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({
       question,
