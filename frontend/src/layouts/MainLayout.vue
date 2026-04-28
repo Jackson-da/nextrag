@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <!-- 侧边栏 -->
+    <!-- 左侧导航栏 -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="logo">
@@ -55,24 +55,35 @@
     <main class="main-content">
       <router-view />
     </main>
+
+    <!-- 聊天会话侧边栏 (仅在聊天页面显示，位于右侧) -->
+    <ChatSidebar v-if="showChatSidebar" v-model:visible="chatSidebarVisible" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ChatDotRound, Document, Collection, User, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 import { tokenManager, authApi } from '@/api/auth'
+import ChatSidebar from '@/components/ChatSidebar.vue'
+import { useChatStore } from '@/store/chat'
 
 const router = useRouter()
+const route = useRoute()
+const chatStore = useChatStore()
 
 const navItems = [
   { path: '/chat', label: '智能问答', icon: ChatDotRound },
   { path: '/documents', label: '文档管理', icon: Document },
   { path: '/knowledge-bases', label: '知识库', icon: Collection },
 ]
+
+// 是否显示聊天侧边栏
+const showChatSidebar = computed(() => route.path === '/chat')
+const chatSidebarVisible = ref(true)
 
 const username = ref('用户')
 const health = ref({
@@ -113,6 +124,7 @@ async function fetchUserInfo() {
 function handleUserCommand(command: string) {
   if (command === 'logout') {
     tokenManager.removeToken()
+    chatStore.reset() // 清空会话历史
     ElMessage.success('已退出登录')
     router.push('/login')
   }
@@ -145,8 +157,11 @@ onMounted(() => {
 
 .main-content {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: #f5f7fa;
+  min-width: 0;
 }
 
 .sidebar-header {
@@ -239,5 +254,16 @@ onMounted(() => {
 
 .version {
   color: rgba(255, 255, 255, 0.5);
+}
+
+/* 聊天侧边栏样式 - 右侧显示 */
+:deep(.chat-sidebar) {
+  order: 2;
+  border-right: none;
+  border-left: 1px solid #e5e7eb;
+}
+
+:deep(.chat-sidebar.collapsed) {
+  border-left: none;
 }
 </style>

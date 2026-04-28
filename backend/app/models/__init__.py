@@ -1,4 +1,7 @@
 """数据模型包"""
+# 导入 ORM 模型以注册到 Base.metadata
+from app.models.chat import ChatSessionModel, ChatMessageModel  # noqa: F401
+
 from app.models.schemas import (
     DocumentStatus,
     DocumentBase,

@@ -33,6 +33,7 @@ TestingSessionLocal: sessionmaker[Session] = sessionmaker(autocommit=False, auto
 # 导入所有模型以确保它们被注册到 Base
 from app.models.user import UserModel
 from app.models.database import DocumentModel, KnowledgeBaseModel
+from app.models.chat import ChatSessionModel, ChatMessageModel
 
 
 @pytest.fixture(scope="function")

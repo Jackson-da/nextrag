@@ -8,7 +8,7 @@ import structlog
 from app.config import get_settings
 from app.core.logging import setup_logging, get_logger
 from app.middleware.logging import LoggingMiddleware
-from app.api import document_router, chat_router, knowledge_router, system_router, simple_health_router, auth_router
+from app.api import document_router, chat_router, chat_session_router, knowledge_router, system_router, simple_health_router, auth_router
 from app import __version__
 
 
@@ -172,6 +172,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(simple_health_router)  # /health - 不带前缀
 app.include_router(document_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(chat_session_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
