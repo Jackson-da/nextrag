@@ -1,7 +1,6 @@
 """聊天会话和消息模型"""
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Index, func
 from sqlalchemy.orm import relationship
-from datetime import datetime
 
 from app.models.database import Base
 
@@ -14,8 +13,8 @@ class ChatSessionModel(Base):
     user_id = Column(String(36), nullable=False, index=True)
     title = Column(String(200), default="新对话")
     knowledge_base_id = Column(String(36), nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     # 关联消息
     messages = relationship(
@@ -56,7 +55,7 @@ class ChatMessageModel(Base):
     role = Column(String(20), nullable=False)  # "user" 或 "assistant"
     content = Column(Text, nullable=False)
     sources = Column(Text, nullable=True)  # AI 回复的引用来源，JSON 字符串
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=func.now())
 
     # 关联会话
     session = relationship("ChatSessionModel", back_populates="messages")
