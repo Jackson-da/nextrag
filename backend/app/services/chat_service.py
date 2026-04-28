@@ -1,13 +1,19 @@
 """聊天服务 - RAG 对话"""
+import json
 import time
+import uuid
 from typing import Any
+from datetime import datetime
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_deepseek import ChatDeepSeek
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.rag_chain import RAGChainBuilder
 from app.core.vectorstore import VectorStoreManager
+from app.models.database import SessionLocal
+from app.models.chat import ChatSessionModel, ChatMessageModel
 
 
 class ChatService:
@@ -33,7 +39,7 @@ class ChatService:
         # 懒加载
         self._llm: ChatDeepSeek | None = None
         self._rag_chains: dict[str | None, RAGChainBuilder] = {}  # 按 kb_id 缓存
-        self._chat_histories: dict[str, list] = {}
+        self._chat_histories: dict[str, list] = {}  # 内存缓存（用于 RAG 链）
     
     @property
     def llm(self) -> ChatDeepSeek:
@@ -79,6 +85,99 @@ class ChatService:
             )
         return self._rag_chains[cache_key]
     
+    def _ensure_session(self, session_id: str, user_id: str, kb_id: str | None = None) -> bool:
+        """确保会话存在，不存在则创建"""
+        db: Session = SessionLocal()
+        try:
+            session = db.query(ChatSessionModel).filter(
+                ChatSessionModel.id == session_id,
+                ChatSessionModel.user_id == user_id
+            ).first()
+            
+            if not session:
+                # 创建新会话
+                session = ChatSessionModel(
+                    id=session_id,
+                    user_id=user_id,
+                    title="新对话",
+                    knowledge_base_id=kb_id,
+                )
+                db.add(session)
+                db.commit()
+                return True
+            return False
+        finally:
+            db.close()
+    
+    def _save_message(
+        self,
+        session_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        sources: list | None = None
+    ) -> ChatMessageModel:
+        """保存消息到数据库"""
+        db: Session = SessionLocal()
+        try:
+            message = ChatMessageModel(
+                id=str(uuid.uuid4()),
+                session_id=session_id,
+                user_id=user_id,
+                role=role,
+                content=content,
+                sources=json.dumps(sources, ensure_ascii=False) if sources else None,
+            )
+            db.add(message)
+            
+            # 更新会话的 updated_at
+            session = db.query(ChatSessionModel).filter(
+                ChatSessionModel.id == session_id
+            ).first()
+            if session:
+                session.updated_at = datetime.now()
+                # 如果是第一条用户消息，更新会话标题
+                if role == "user" and session.title == "新对话":
+                    session.title = content[:30] + ("..." if len(content) > 30 else "")
+            
+            db.commit()
+            db.refresh(message)
+            return message
+        finally:
+            db.close()
+    
+    def load_session_messages(self, session_id: str, user_id: str) -> list:
+        """从数据库加载会话消息"""
+        db: Session = SessionLocal()
+        try:
+            # 验证会话所有权
+            session = db.query(ChatSessionModel).filter(
+                ChatSessionModel.id == session_id,
+                ChatSessionModel.user_id == user_id
+            ).first()
+            
+            if not session:
+                return []
+            
+            messages = db.query(ChatMessageModel).filter(
+                ChatMessageModel.session_id == session_id
+            ).order_by(ChatMessageModel.created_at.asc()).all()
+            
+            # 转换为 LangChain 格式
+            chat_history = []
+            for msg in messages:
+                if msg.role == "user":
+                    chat_history.append(HumanMessage(content=msg.content))
+                else:
+                    chat_history.append(AIMessage(content=msg.content))
+            
+            # 更新内存缓存
+            self._chat_histories[session_id] = chat_history
+            
+            return chat_history
+        finally:
+            db.close()
+    
     async def chat(
         self,
         question: str,
@@ -99,7 +198,12 @@ class ChatService:
         """
         start_time = time.time()
         
-        # 获取对话历史
+        # 确保会话存在
+        self._ensure_session(session_id, user_id, kb_id)
+        
+        # 获取对话历史（从数据库加载）
+        if session_id not in self._chat_histories:
+            self.load_session_messages(session_id, user_id)
         chat_history = self._chat_histories.get(session_id, [])
         
         # 获取缓存的 RAG 链
@@ -111,12 +215,12 @@ class ChatService:
             chat_history=chat_history,
         )
         
-        # 更新对话历史
+        # 更新对话历史（内存）
         chat_history.append(HumanMessage(content=question))
         chat_history.append(AIMessage(content=result["answer"]))
         self._chat_histories[session_id] = chat_history
         
-        # 提取来源
+        # 保存消息到数据库
         sources = []
         if "context" in result:
             for doc in result["context"]:
@@ -125,6 +229,11 @@ class ChatService:
                         "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
                         "metadata": doc.metadata,
                     })
+        
+        # 保存用户消息
+        self._save_message(session_id, user_id, "user", question)
+        # 保存 AI 回复
+        self._save_message(session_id, user_id, "assistant", result["answer"], sources)
         
         latency = time.time() - start_time
         
@@ -151,7 +260,12 @@ class ChatService:
             kb_id: 知识库 ID，None 表示全局检索
             user_id: 用户 ID，用于数据隔离
         """
-        # 获取对话历史
+        # 确保会话存在
+        self._ensure_session(session_id, user_id, kb_id)
+        
+        # 获取对话历史（从数据库加载）
+        if session_id not in self._chat_histories:
+            self.load_session_messages(session_id, user_id)
         chat_history = self._chat_histories.get(session_id, [])
         
         # 获取缓存的 RAG 链
@@ -159,6 +273,7 @@ class ChatService:
         
         # 流式调用
         full_answer = ""
+        sources = []
         async for token in rag_chain.astream(
             input=question,
             chat_history=chat_history,
@@ -166,10 +281,16 @@ class ChatService:
             full_answer += token
             yield {"event": "message", "data": {"content": token}}
         
-        # 更新对话历史
+        # 更新对话历史（内存）
         chat_history.append(HumanMessage(content=question))
         chat_history.append(AIMessage(content=full_answer))
         self._chat_histories[session_id] = chat_history
+        
+        # 保存消息到数据库
+        # 保存用户消息
+        self._save_message(session_id, user_id, "user", question)
+        # 保存 AI 回复
+        self._save_message(session_id, user_id, "assistant", full_answer, sources)
         
         yield {"event": "done", "data": {}}
     

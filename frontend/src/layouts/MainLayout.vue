@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <!-- 侧边栏 -->
+    <!-- 左侧导航栏 -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="logo">
@@ -51,6 +51,9 @@
       </div>
     </aside>
 
+    <!-- 聊天会话侧边栏 (仅在聊天页面显示) -->
+    <ChatSidebar v-if="showChatSidebar" v-model:visible="chatSidebarVisible" />
+
     <!-- 主内容区 -->
     <main class="main-content">
       <router-view />
@@ -59,20 +62,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ChatDotRound, Document, Collection, User, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
 import { tokenManager, authApi } from '@/api/auth'
+import ChatSidebar from '@/components/ChatSidebar.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const navItems = [
   { path: '/chat', label: '智能问答', icon: ChatDotRound },
   { path: '/documents', label: '文档管理', icon: Document },
   { path: '/knowledge-bases', label: '知识库', icon: Collection },
 ]
+
+// 是否显示聊天侧边栏
+const showChatSidebar = computed(() => route.path === '/chat')
+const chatSidebarVisible = ref(true)
 
 const username = ref('用户')
 const health = ref({
@@ -145,9 +154,17 @@ onMounted(() => {
 
 .main-content {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: #f5f7fa;
 }
+
+/* 当有聊天侧边栏时，主内容区应该是 flex-row */
+.app-container:has(.chat-sidebar:not(.collapsed)) .main-content {
+  flex-direction: row;
+}
+</style>
 
 .sidebar-header {
   padding: 20px;
