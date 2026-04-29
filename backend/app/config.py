@@ -164,6 +164,11 @@ class Settings(BaseSettings):
     )
     max_file_size: int = Field(default=50 * 1024 * 1024, description="最大文件大小 (50MB)")
     
+    # ==================== 批量上传配置 ====================
+    max_concurrent_uploads: int = Field(default=3, description="最大并发上传数")
+    batch_max_files: int = Field(default=20, description="单次批量最大文件数")
+    batch_max_total_size: int = Field(default=200 * 1024 * 1024, description="单次批量总大小限制(200MB)")
+    
     # ==================== 验证器 ====================
     @field_validator("temperature")
     @classmethod

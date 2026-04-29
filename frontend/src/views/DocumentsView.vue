@@ -5,8 +5,11 @@
       <h1 class="page-title">文档管理</h1>
       <div class="header-actions">
         <el-button :icon="Refresh" @click="refresh">刷新</el-button>
-        <el-button type="primary" :icon="Upload" @click="showUploadDialog = true">
+        <el-button type="primary" :icon="UploadFilled" @click="showUploadDialog = true">
           上传文档
+        </el-button>
+        <el-button type="success" :icon="Upload" @click="showBatchUploadDialog = true">
+          批量上传
         </el-button>
       </div>
     </header>
@@ -242,6 +245,87 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量上传对话框 -->
+    <el-dialog
+      v-model="showBatchUploadDialog"
+      title="批量上传文档"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div class="batch-upload-area" @dragover.prevent @drop.prevent="handleBatchDrop">
+        <el-upload
+          ref="batchUploadRef"
+          :auto-upload="false"
+          :limit="20"
+          multiple
+          :on-change="handleBatchFileChange"
+          :file-list="batchFileList"
+          accept=".pdf,.docx,.doc,.txt,.md"
+          class="batch-upload-component"
+        >
+          <div class="upload-placeholder">
+            <el-icon :size="48"><Upload /></el-icon>
+            <p>拖拽文件到此处，或<em>点击选择</em></p>
+            <p class="upload-tip">支持 PDF、Word、TXT、Markdown 格式，最多 20 个文件</p>
+          </div>
+        </el-upload>
+      </div>
+
+      <!-- 已选文件列表 -->
+      <div v-if="batchFileList.length > 0" class="batch-file-list">
+        <div class="batch-file-header">
+          <span>已选择 {{ batchFileList.length }} 个文件</span>
+          <el-button type="danger" size="small" link @click="clearBatchFiles">清空</el-button>
+        </div>
+        <el-table :data="batchFileList" size="small" max-height="200">
+          <el-table-column prop="name" label="文件名" />
+          <el-table-column label="大小" width="100">
+            <template #default="{ row }">
+              {{ formatFileSize(row.size) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="batchResults[row.name]" :type="batchResults[row.name].status === 'success' ? 'success' : 'danger'" size="small">
+                {{ batchResults[row.name].status === 'success' ? '成功' : '失败' }}
+              </el-tag>
+              <span v-else class="text-muted">等待上传</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <el-form :model="batchUploadForm" label-width="80px" class="batch-form">
+        <el-form-item label="知识库">
+          <el-select
+            v-model="batchUploadForm.knowledge_base_id"
+            placeholder="选择知识库（可选）"
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="kb in knowledgeBaseStore.knowledgeBases"
+              :key="kb.id"
+              :label="kb.name"
+              :value="kb.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="showBatchUploadDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="batchUploading"
+          :disabled="batchFileList.length === 0"
+          @click="handleBatchUpload"
+        >
+          开始上传
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -250,6 +334,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Upload,
+  UploadFilled,
   Refresh,
   Delete,
   Document,
@@ -269,8 +354,19 @@ const uploadRef = ref<UploadInstance>()
 const selectedFile = ref<File | null>(null)
 const fileList = ref<{ name: string }[]>([])
 
+// 批量上传
+const showBatchUploadDialog = ref(false)
+const batchUploadRef = ref<UploadInstance>()
+const batchUploading = ref(false)
+const batchFileList = ref<{ name: string; size: number; status?: string }[]>([])
+const batchResults = ref<Record<string, { status: string; message?: string }>>({})
+
 const uploadForm = reactive({
   description: '',
+  knowledge_base_id: '',
+})
+
+const batchUploadForm = reactive({
   knowledge_base_id: '',
 })
 
@@ -369,6 +465,89 @@ async function refresh() {
 function handleKnowledgeBaseChange() {
   currentPage.value = 1
   refresh()
+}
+
+// 批量上传相关
+function handleBatchFileChange(file: { name: string; size: number; raw?: UploadRawFile }) {
+  const exists = batchFileList.value.some((f) => f.name === file.name)
+  if (!exists) {
+    batchFileList.value.push({ name: file.name, size: file.size })
+  }
+}
+
+function handleBatchDrop(e: DragEvent) {
+  const files = e.dataTransfer?.files
+  if (files) {
+    for (const file of Array.from(files)) {
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+      if (['.pdf', '.docx', '.doc', '.txt', '.md'].includes(ext)) {
+        const exists = batchFileList.value.some((f) => f.name === file.name)
+        if (!exists) {
+          batchFileList.value.push({ name: file.name, size: file.size })
+        }
+      }
+    }
+  }
+}
+
+function clearBatchFiles() {
+  batchFileList.value = []
+  batchResults.value = {}
+  batchUploadRef.value?.clearFiles()
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+async function handleBatchUpload() {
+  if (batchFileList.value.length === 0) {
+    ElMessage.warning('请选择文件')
+    return
+  }
+
+  batchUploading.value = true
+  batchResults.value = {}
+
+  try {
+    const files = batchFileList.value.map((f) => f.raw as File)
+    const response = await documentApi.uploadBatch(
+      files,
+      batchUploadForm.knowledge_base_id || undefined
+    )
+
+    // 更新结果状态
+    response.results.forEach((result) => {
+      batchResults.value[result.filename] = {
+        status: result.status,
+        message: result.error || result.chunk_count ? `分块数: ${result.chunk_count}` : undefined,
+      }
+    })
+
+    // 显示汇总消息
+    if (response.failed_count === 0) {
+      ElMessage.success(`批量上传成功！${response.success_count} 个文件已处理`)
+    } else {
+      ElMessage.warning(
+        `上传完成：成功 ${response.success_count} 个，失败 ${response.failed_count} 个`
+      )
+    }
+
+    // 成功后关闭对话框并刷新
+    if (response.success_count > 0) {
+      showBatchUploadDialog.value = false
+      clearBatchFiles()
+      batchUploadForm.knowledge_base_id = ''
+      refresh()
+      documentStore.fetchVectorStoreInfo()
+    }
+  } catch (error) {
+    ElMessage.error('批量上传失败，请重试')
+  } finally {
+    batchUploading.value = false
+  }
 }
 
 onMounted(() => {
@@ -485,5 +664,66 @@ onMounted(() => {
 
 .text-muted {
   color: #9ca3af;
+}
+
+.batch-upload-area {
+  border: 2px dashed #dcdfe6;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  transition: border-color 0.3s;
+}
+
+.batch-upload-area:hover {
+  border-color: #409eff;
+}
+
+.batch-upload-component {
+  width: 100%;
+}
+
+.batch-upload-component :deep(.el-upload) {
+  width: 100%;
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 0;
+  color: #909399;
+}
+
+.upload-placeholder p {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.upload-placeholder em {
+  color: #409eff;
+  font-style: normal;
+}
+
+.upload-tip {
+  font-size: 12px !important;
+  color: #c0c4cc !important;
+}
+
+.batch-file-list {
+  margin-bottom: 16px;
+}
+
+.batch-file-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #606266;
+}
+
+.batch-form {
+  margin-top: 16px;
 }
 </style>

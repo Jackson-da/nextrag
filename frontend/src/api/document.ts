@@ -4,6 +4,7 @@ import type {
   DocumentListResponse,
   UploadResponse,
   VectorStoreInfo,
+  BatchUploadResponse,
 } from '@/types'
 
 export const documentApi = {
@@ -24,6 +25,24 @@ export const documentApi = {
 
     return request.upload<UploadResponse>('/documents/upload', formData, {
       timeout: 120000, // 上传文件需要更长的超时时间
+    })
+  },
+
+  // 批量上传文档
+  uploadBatch(
+    files: File[],
+    knowledgeBaseId?: string
+  ): Promise<BatchUploadResponse> {
+    const formData = new FormData()
+    files.forEach((file) => {
+      formData.append('files', file)
+    })
+    if (knowledgeBaseId) {
+      formData.append('knowledge_base_id', knowledgeBaseId)
+    }
+
+    return request.upload<BatchUploadResponse>('/documents/upload/batch', formData, {
+      timeout: 600000, // 批量上传需要更长的超时时间
     })
   },
 
