@@ -12,8 +12,12 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.rag_chain import RAGChainBuilder
 from app.core.vectorstore import VectorStoreManager
+from app.core.cache import CacheKeys, delete_cache, get_or_set, get_redis
 from app.models.database import SessionLocal
 from app.models.chat import ChatSessionModel, ChatMessageModel
+
+import structlog
+logger = structlog.get_logger()
 
 
 class ChatService:
@@ -64,16 +68,6 @@ class ChatService:
         
         return self.vectorstore.as_retriever
     
-    @property
-    def rag_chain(self) -> RAGChainBuilder:
-        """获取 RAG 链"""
-        if self._rag_chain is None:
-            self._rag_chain = RAGChainBuilder(
-                llm=self.llm,
-                retriever=self.retriever,
-            )
-        return self._rag_chain
-    
     def _get_rag_chain(self, kb_id: str | None = None, user_id: str | None = None) -> RAGChainBuilder:
         """获取或创建 RAG 链（按 kb_id 和 user_id 缓存）"""
         cache_key = f"{kb_id}:{user_id}"
@@ -104,6 +98,9 @@ class ChatService:
                 )
                 db.add(session)
                 db.commit()
+                # 清除会话列表缓存
+                import asyncio
+                asyncio.create_task(delete_cache(CacheKeys.sessions(user_id)))
                 return True
             return False
         finally:
@@ -142,11 +139,19 @@ class ChatService:
             
             db.commit()
             db.refresh(message)
+            
+            # 清除消息缓存（下次加载时获取最新数据）
+            import asyncio
+            asyncio.create_task(delete_cache(
+                CacheKeys.messages(session_id),
+                CacheKeys.meta(session_id)
+            ))
+            
             return message
         finally:
             db.close()
     
-    def load_session_messages(self, session_id: str, user_id: str) -> list:
+    def _load_from_db(self, session_id: str, user_id: str) -> list:
         """从数据库加载会话消息"""
         db: Session = SessionLocal()
         try:
@@ -171,12 +176,55 @@ class ChatService:
                 else:
                     chat_history.append(AIMessage(content=msg.content))
             
-            # 更新内存缓存
-            self._chat_histories[session_id] = chat_history
-            
             return chat_history
         finally:
             db.close()
+    
+    async def load_session_messages(self, session_id: str, user_id: str) -> list:
+        """从缓存或数据库加载会话消息
+        
+        优先从 Redis 缓存获取，未命中则从 SQLite 加载并回填缓存
+        """
+        cache_key = CacheKeys.messages(session_id)
+        
+        # 尝试从缓存获取
+        redis = await get_redis()
+        if redis:
+            try:
+                cached = await redis.get(cache_key)
+                if cached:
+                    data = json.loads(cached)
+                    # 转换为 LangChain 格式
+                    chat_history = []
+                    for msg in data:
+                        if msg["role"] == "user":
+                            chat_history.append(HumanMessage(content=msg["content"]))
+                        else:
+                            chat_history.append(AIMessage(content=msg["content"]))
+                    self._chat_histories[session_id] = chat_history
+                    logger.debug(f"从缓存加载会话: {session_id}")
+                    return chat_history
+            except Exception as e:
+                logger.warning(f"缓存读取失败: {e}")
+        
+        # 未命中，从数据库加载
+        chat_history = self._load_from_db(session_id, user_id)
+        
+        # 回填缓存
+        if redis and chat_history:
+            try:
+                cache_data = [{"role": "user" if isinstance(m, HumanMessage) else "assistant", 
+                              "content": m.content} 
+                             for m in chat_history]
+                await redis.setex(cache_key, CacheKeys.TTL_MESSAGES, json.dumps(cache_data))
+                logger.debug(f"缓存写入会话: {session_id}")
+            except Exception as e:
+                logger.warning(f"缓存写入失败: {e}")
+        
+        # 更新内存缓存
+        self._chat_histories[session_id] = chat_history
+        
+        return chat_history
     
     async def chat(
         self,
@@ -187,23 +235,15 @@ class ChatService:
         user_id: str | None = None,
         **kwargs
     ) -> dict[str, Any]:
-        """处理聊天请求
-        
-        Args:
-            question: 用户问题
-            session_id: 会话 ID
-            stream: 是否流式输出（未使用，保留接口）
-            kb_id: 知识库 ID，None 表示全局检索
-            user_id: 用户 ID，用于数据隔离
-        """
+        """处理聊天请求"""
         start_time = time.time()
         
         # 确保会话存在
         self._ensure_session(session_id, user_id, kb_id)
         
-        # 获取对话历史（从数据库加载）
+        # 获取对话历史（从缓存或数据库）
         if session_id not in self._chat_histories:
-            self.load_session_messages(session_id, user_id)
+            await self.load_session_messages(session_id, user_id)
         chat_history = self._chat_histories.get(session_id, [])
         
         # 获取缓存的 RAG 链
@@ -252,20 +292,13 @@ class ChatService:
         user_id: str | None = None,
         **kwargs
     ):
-        """流式聊天
-        
-        Args:
-            question: 用户问题
-            session_id: 会话 ID
-            kb_id: 知识库 ID，None 表示全局检索
-            user_id: 用户 ID，用于数据隔离
-        """
+        """流式聊天"""
         # 确保会话存在
         self._ensure_session(session_id, user_id, kb_id)
         
-        # 获取对话历史（从数据库加载）
+        # 获取对话历史（从缓存或数据库）
         if session_id not in self._chat_histories:
-            self.load_session_messages(session_id, user_id)
+            await self.load_session_messages(session_id, user_id)
         chat_history = self._chat_histories.get(session_id, [])
         
         # 获取缓存的 RAG 链
@@ -287,32 +320,52 @@ class ChatService:
         self._chat_histories[session_id] = chat_history
         
         # 保存消息到数据库
-        # 保存用户消息
         self._save_message(session_id, user_id, "user", question)
-        # 保存 AI 回复
         self._save_message(session_id, user_id, "assistant", full_answer, sources)
         
         yield {"event": "done", "data": {}}
     
     def clear_history(self, session_id: str = "default") -> bool:
-        """清除对话历史"""
+        """清除对话历史（内存 + Redis）"""
+        import asyncio
+        
+        # 清除内存
         if session_id in self._chat_histories:
             del self._chat_histories[session_id]
-            return True
-        return False
+        
+        # 异步清除 Redis 缓存
+        asyncio.create_task(delete_cache(
+            CacheKeys.messages(session_id),
+            CacheKeys.meta(session_id)
+        ))
+        
+        return True
     
     def get_history(self, session_id: str = "default") -> list:
         """获取对话历史"""
         return self._chat_histories.get(session_id, [])
     
-    async def health_check(self) -> bool:
+    async def health_check(self) -> dict[str, bool]:
         """健康检查"""
+        result = {"llm": False, "redis": False}
+        
+        # 检查 LLM
         try:
-            # 测试 LLM 连接
             await self.llm.ainvoke("ping")
-            return True
+            result["llm"] = True
         except Exception:
-            return False
+            pass
+        
+        # 检查 Redis
+        redis = await get_redis()
+        if redis:
+            try:
+                await redis.ping()
+                result["redis"] = True
+            except Exception:
+                pass
+        
+        return result
 
 
 # 全局服务实例（懒加载）

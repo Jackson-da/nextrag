@@ -24,9 +24,16 @@ async def lifespan(app: FastAPI):
         "配置加载完成",
         llm_model=settings.llm_model,
         embedding_model=settings.embedding_model,
+        redis_enabled=settings.redis_enabled,
         log_console=settings.log_console,
         log_file=settings.log_file,
     )
+    
+    # 初始化 Redis 连接
+    from app.core.cache import get_redis
+    redis = await get_redis()
+    if redis:
+        logger.info("Redis 连接已初始化")
 
     yield
 
@@ -60,6 +67,11 @@ async def lifespan(app: FastAPI):
         from app.models.database import close_db
         close_db()
         logger.info("数据库连接已关闭")
+        
+        # 关闭 Redis 连接
+        from app.core.cache import close_redis
+        await close_redis()
+        logger.info("Redis 连接已关闭")
         
         logger.info("应用关闭完成")
     except Exception as e:

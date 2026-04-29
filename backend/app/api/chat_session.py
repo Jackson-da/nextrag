@@ -1,4 +1,5 @@
 """聊天会话管理 API"""
+import json
 import uuid
 from datetime import datetime
 import structlog
@@ -10,6 +11,7 @@ from app.models.database import get_db
 from app.models.user import UserModel
 from app.models.chat import ChatSessionModel, ChatMessageModel
 from app.api.auth import get_current_user
+from app.core.cache import CacheKeys, delete_cache, get_redis
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/chat/sessions", tags=["会话管理"])
@@ -66,6 +68,16 @@ class DeleteResponse(BaseModel):
     message: str
 
 
+def _query_sessions(db: Session, user_id: str) -> list[ChatSessionModel]:
+    """查询用户会话列表"""
+    return (
+        db.query(ChatSessionModel)
+        .filter(ChatSessionModel.user_id == user_id)
+        .order_by(ChatSessionModel.updated_at.desc())
+        .all()
+    )
+
+
 # ============== API 路由 ==============
 
 @router.get("", response_model=SessionListResponse)
@@ -73,19 +85,41 @@ async def list_sessions(
     current_user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取用户所有会话列表"""
-    sessions = (
-        db.query(ChatSessionModel)
-        .filter(ChatSessionModel.user_id == current_user.id)
-        .order_by(ChatSessionModel.updated_at.desc())
-        .all()
-    )
+    """获取用户所有会话列表
+    
+    优先从 Redis 缓存获取，未命中则从数据库加载
+    """
+    cache_key = CacheKeys.sessions(current_user.id)
+    
+    # 尝试从缓存获取
+    redis = await get_redis()
+    if redis:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                data = json.loads(cached)
+                sessions = [SessionResponse(**s) for s in data]
+                logger.debug(f"从缓存获取会话列表: {current_user.id}")
+                return SessionListResponse(sessions=sessions)
+        except Exception as e:
+            logger.warning(f"会话列表缓存读取失败: {e}")
+    
+    # 未命中，从数据库查询
+    sessions = _query_sessions(db, current_user.id)
+    session_responses = [SessionResponse(**s.to_dict()) for s in sessions]
+    
+    # 回填缓存
+    if redis:
+        try:
+            cache_data = [s.model_dump() for s in session_responses]
+            await redis.setex(cache_key, CacheKeys.TTL_SESSIONS, json.dumps(cache_data))
+            logger.debug(f"会话列表缓存写入: {current_user.id}")
+        except Exception as e:
+            logger.warning(f"会话列表缓存写入失败: {e}")
     
     logger.info("获取会话列表", user_id=current_user.id, count=len(sessions))
     
-    return SessionListResponse(
-        sessions=[SessionResponse(**s.to_dict()) for s in sessions]
-    )
+    return SessionListResponse(sessions=session_responses)
 
 
 @router.post("", response_model=SessionResponse)
@@ -109,6 +143,9 @@ async def create_session(
     db.add(session)
     db.commit()
     db.refresh(session)
+    
+    # 清除会话列表缓存
+    await delete_cache(CacheKeys.sessions(current_user.id))
     
     logger.info("创建会话", user_id=current_user.id, session_id=session_id)
     
@@ -164,6 +201,9 @@ async def update_session(
     db.commit()
     db.refresh(session)
     
+    # 清除会话列表缓存
+    await delete_cache(CacheKeys.sessions(current_user.id))
+    
     logger.info("更新会话", user_id=current_user.id, session_id=session_id)
     
     return SessionResponse(**session.to_dict())
@@ -191,6 +231,13 @@ async def delete_session(
     # 级联删除会自动删除关联的消息
     db.delete(session)
     db.commit()
+    
+    # 清除相关缓存
+    await delete_cache(
+        CacheKeys.messages(session_id),
+        CacheKeys.meta(session_id),
+        CacheKeys.sessions(current_user.id)
+    )
     
     logger.info("删除会话", user_id=current_user.id, session_id=session_id)
     
@@ -265,6 +312,12 @@ async def clear_session_messages(
     # 更新会话时间
     session.updated_at = datetime.now()
     db.commit()
+    
+    # 清除相关缓存
+    await delete_cache(
+        CacheKeys.messages(session_id),
+        CacheKeys.meta(session_id)
+    )
     
     logger.info("清空会话消息", user_id=current_user.id, session_id=session_id)
     
