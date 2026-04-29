@@ -220,9 +220,9 @@ class TestDocumentAPI:
 class TestChatAPI:
     """聊天 API 测试"""
     
-    def test_get_history_empty(self, client: TestClient):
+    def test_get_history_empty(self, client: TestClient, auth_headers: dict):
         """测试获取空的对话历史"""
-        response = client.get("/api/v1/chat/history/test-session-123")
+        response = client.get("/api/v1/chat/history/test-session-123", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -232,9 +232,9 @@ class TestChatAPI:
         assert data["session_id"] == "test-session-123"
         assert data["messages"] == []
     
-    def test_clear_history(self, client: TestClient):
+    def test_clear_history(self, client: TestClient, auth_headers: dict):
         """测试清除对话历史"""
-        response = client.delete("/api/v1/chat/history/test-session-456")
+        response = client.delete("/api/v1/chat/history/test-session-456", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -242,9 +242,9 @@ class TestChatAPI:
         assert "success" in data
         assert "message" in data
     
-    def test_chat_health_check(self, client: TestClient):
+    def test_chat_health_check(self, client: TestClient, auth_headers: dict):
         """测试问答服务健康检查"""
-        response = client.post("/api/v1/chat/health")
+        response = client.post("/api/v1/chat/health", headers=auth_headers)
         
         assert response.status_code == 200
         data = response.json()
@@ -347,10 +347,10 @@ class TestChatWithKnowledgeBase:
         )
         assert response.status_code == 422
     
-    def test_get_history_with_different_sessions(self, client: TestClient):
+    def test_get_history_with_different_sessions(self, client: TestClient, auth_headers: dict):
         """测试不同 session_id 获取各自的对话历史"""
         # 获取第一个会话的历史
-        response1 = client.get("/api/v1/chat/history/session-1")
+        response1 = client.get("/api/v1/chat/history/session-1", headers=auth_headers)
         assert response1.status_code == 200
         assert response1.json()["session_id"] == "session-1"
         
@@ -359,10 +359,10 @@ class TestChatWithKnowledgeBase:
         assert response2.status_code == 200
         assert response2.json()["session_id"] == "session-2"
     
-    def test_clear_specific_session_history(self, client: TestClient):
+    def test_clear_specific_session_history(self, client: TestClient, auth_headers: dict):
         """测试清除特定会话的历史"""
         # 清除指定会话（无论是否存在都应能处理）
-        response = client.delete("/api/v1/chat/history/my-session-clear-test")
+        response = client.delete("/api/v1/chat/history/my-session-clear-test", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         # 验证响应结构正确
