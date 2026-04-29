@@ -37,6 +37,9 @@ frontend/node_modules/
 dist/
 frontend/dist/
 
+# Documentation
+docs/
+
 # Logs
 *.log
 npm-debug.log*
