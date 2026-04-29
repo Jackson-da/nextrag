@@ -2,6 +2,7 @@
 import json
 import time
 import uuid
+import hashlib
 from typing import Any
 from datetime import datetime
 from langchain_core.documents import Document
@@ -202,8 +203,10 @@ class ChatService:
                         else:
                             chat_history.append(AIMessage(content=msg["content"]))
                     self._chat_histories[session_id] = chat_history
-                    logger.debug(f"从缓存加载会话: {session_id}")
+                    logger.info(f"[CACHE HIT] 从缓存加载会话消息: {session_id} ({len(data)} 条)")
                     return chat_history
+                else:
+                    logger.info(f"[CACHE MISS] 缓存未命中，从数据库加载: {session_id}")
             except Exception as e:
                 logger.warning(f"缓存读取失败: {e}")
         
@@ -217,7 +220,7 @@ class ChatService:
                               "content": m.content} 
                              for m in chat_history]
                 await redis.setex(cache_key, CacheKeys.TTL_MESSAGES, json.dumps(cache_data))
-                logger.debug(f"缓存写入会话: {session_id}")
+                logger.info(f"[CACHE SET] 写入缓存: {session_id} ({len(cache_data)} 条消息, TTL={CacheKeys.TTL_MESSAGES}s)")
             except Exception as e:
                 logger.warning(f"缓存写入失败: {e}")
         
@@ -240,6 +243,40 @@ class ChatService:
         
         # 确保会话存在
         self._ensure_session(session_id, user_id, kb_id)
+        
+        # ========== LLM 回答缓存检查 ==========
+        # 计算问题的 hash（用于精确匹配缓存）
+        question_hash = hashlib.md5(question.encode()).hexdigest()
+        cache_key = CacheKeys.llm_response(question_hash)
+        
+        redis = await get_redis()
+        if redis:
+            try:
+                cached = await redis.get(cache_key)
+                if cached:
+                    result = json.loads(cached)
+                    logger.info(f"[LLM CACHE HIT] 问题: {question[:50]}...")
+                    # 更新对话历史（即使命中缓存也要记录）
+                    if session_id not in self._chat_histories:
+                        await self.load_session_messages(session_id, user_id)
+                    chat_history = self._chat_histories.get(session_id, [])
+                    chat_history.append(HumanMessage(content=question))
+                    chat_history.append(AIMessage(content=result["answer"]))
+                    self._chat_histories[session_id] = chat_history
+                    # 保存消息到数据库（用于持久化）
+                    self._save_message(session_id, user_id, "user", question)
+                    self._save_message(session_id, user_id, "assistant", result["answer"], result.get("sources", []))
+                    return {
+                        "answer": result["answer"],
+                        "session_id": session_id,
+                        "sources": result.get("sources", []),
+                        "latency": time.time() - start_time,
+                        "cached": True,
+                    }
+                else:
+                    logger.info(f"[LLM CACHE MISS] 问题: {question[:50]}...")
+            except Exception as e:
+                logger.warning(f"LLM 缓存读取失败: {e}")
         
         # 获取对话历史（从缓存或数据库）
         if session_id not in self._chat_histories:
@@ -275,6 +312,19 @@ class ChatService:
         # 保存 AI 回复
         self._save_message(session_id, user_id, "assistant", result["answer"], sources)
         
+        # ========== 写入 LLM 回答缓存 ==========
+        if redis:
+            try:
+                cache_data = {
+                    "answer": result["answer"],
+                    "sources": sources,
+                }
+                # LLM 回答缓存 TTL = 1 小时（相同问题通常短期内重复问）
+                await redis.setex(cache_key, CacheKeys.TTL_META, json.dumps(cache_data, default=str))
+                logger.info(f"[LLM CACHE SET] TTL={CacheKeys.TTL_META}s")
+            except Exception as e:
+                logger.warning(f"LLM 缓存写入失败: {e}")
+        
         latency = time.time() - start_time
         
         return {
@@ -282,6 +332,7 @@ class ChatService:
             "session_id": session_id,
             "sources": sources,
             "latency": latency,
+            "cached": False,
         }
     
     async def stream_chat(
@@ -295,6 +346,37 @@ class ChatService:
         """流式聊天"""
         # 确保会话存在
         self._ensure_session(session_id, user_id, kb_id)
+        
+        # ========== LLM 回答缓存检查 ==========
+        question_hash = hashlib.md5(question.encode()).hexdigest()
+        cache_key = CacheKeys.llm_response(question_hash)
+        
+        redis = await get_redis()
+        if redis:
+            try:
+                cached = await redis.get(cache_key)
+                if cached:
+                    result = json.loads(cached)
+                    logger.info(f"[LLM CACHE HIT] 问题: {question[:50]}...")
+                    # 命中缓存，流式返回缓存内容
+                    for i in range(0, len(result["answer"]), 10):
+                        yield {"event": "message", "data": {"content": result["answer"][i:i+10]}}
+                    # 更新对话历史
+                    if session_id not in self._chat_histories:
+                        await self.load_session_messages(session_id, user_id)
+                    chat_history = self._chat_histories.get(session_id, [])
+                    chat_history.append(HumanMessage(content=question))
+                    chat_history.append(AIMessage(content=result["answer"]))
+                    self._chat_histories[session_id] = chat_history
+                    # 保存消息到数据库
+                    self._save_message(session_id, user_id, "user", question)
+                    self._save_message(session_id, user_id, "assistant", result["answer"], result.get("sources", []))
+                    yield {"event": "done", "data": {"cached": True}}
+                    return
+                else:
+                    logger.info(f"[LLM CACHE MISS] 问题: {question[:50]}...")
+            except Exception as e:
+                logger.warning(f"LLM 缓存读取失败: {e}")
         
         # 获取对话历史（从缓存或数据库）
         if session_id not in self._chat_histories:
@@ -323,7 +405,19 @@ class ChatService:
         self._save_message(session_id, user_id, "user", question)
         self._save_message(session_id, user_id, "assistant", full_answer, sources)
         
-        yield {"event": "done", "data": {}}
+        # ========== 写入 LLM 回答缓存 ==========
+        if redis:
+            try:
+                cache_data = {
+                    "answer": full_answer,
+                    "sources": sources,
+                }
+                await redis.setex(cache_key, CacheKeys.TTL_META, json.dumps(cache_data, default=str))
+                logger.info(f"[LLM CACHE SET] TTL={CacheKeys.TTL_META}s")
+            except Exception as e:
+                logger.warning(f"LLM 缓存写入失败: {e}")
+        
+        yield {"event": "done", "data": {"cached": False}}
     
     def clear_history(self, session_id: str = "default") -> bool:
         """清除对话历史（内存 + Redis）"""

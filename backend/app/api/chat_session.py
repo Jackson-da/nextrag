@@ -12,6 +12,8 @@ from app.models.user import UserModel
 from app.models.chat import ChatSessionModel, ChatMessageModel
 from app.api.auth import get_current_user
 from app.core.cache import CacheKeys, delete_cache, get_redis
+from app.services.chat_service import get_chat_service
+from langchain_core.messages import HumanMessage, AIMessage
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/chat/sessions", tags=["会话管理"])
@@ -264,12 +266,23 @@ async def get_session_messages(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
-    messages = (
-        db.query(ChatMessageModel)
-        .filter(ChatMessageModel.session_id == session_id)
-        .order_by(ChatMessageModel.created_at.asc())
-        .all()
-    )
+    # 使用缓存服务加载消息
+    chat_service = get_chat_service()
+    chat_history = await chat_service.load_session_messages(session_id, current_user.id)
+    
+    # 转换为 MessageResponse 格式
+    messages = []
+    now = datetime.utcnow().isoformat() + "Z"
+    for i, msg in enumerate(chat_history):
+        role = "user" if isinstance(msg, HumanMessage) else "assistant"
+        messages.append(MessageResponse(
+            id=f"{session_id}_{i}",
+            session_id=session_id,
+            role=role,
+            content=msg.content,
+            sources=None,
+            created_at=now
+        ))
     
     logger.info(
         "获取会话消息",
@@ -280,7 +293,7 @@ async def get_session_messages(
     
     return MessageListResponse(
         session_id=session_id,
-        messages=[MessageResponse(**m.to_dict()) for m in messages]
+        messages=messages
     )
 
 

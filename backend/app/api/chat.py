@@ -191,9 +191,13 @@ async def get_history(session_id: str):
 async def chat_health_check():
     """问答服务健康检查"""
     chat_service = get_chat_service()
-    is_healthy = await chat_service.health_check()
+    health_result = await chat_service.health_check()
+    
+    llm_connected = health_result.get("llm", False)
+    redis_connected = health_result.get("redis", False)
     
     return {
-        "status": "healthy" if is_healthy else "unhealthy",
-        "llm_connected": is_healthy,
+        "status": "healthy" if llm_connected else "unhealthy",
+        "llm_connected": llm_connected,
+        "redis_connected": redis_connected,
     }

@@ -1,7 +1,4 @@
 """Pytest 配置文件"""
-from sqlalchemy.orm.session import Session, sessionmaker
-
-
 import os
 from pathlib import Path
 from typing import Generator

@@ -39,7 +39,8 @@ async def health_check():
     try:
         # 检查 LLM 连接
         chat_service = get_chat_service()
-        llm_connected = await chat_service.health_check()
+        health_result = await chat_service.health_check()
+        llm_connected = health_result.get("llm", False)
     except Exception as e:
         logger.warning("LLM 健康检查失败", error=str(e))
         llm_connected = False

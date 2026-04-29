@@ -188,3 +188,8 @@ class CacheKeys:
     def sessions(user_id: str) -> str:
         """用户会话列表"""
         return f"chat:sessions:{user_id}"
+    
+    @staticmethod
+    def llm_response(question_hash: str) -> str:
+        """LLM 回答缓存（精确匹配问题）"""
+        return f"llm:response:{question_hash}"
