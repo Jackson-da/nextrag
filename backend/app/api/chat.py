@@ -164,7 +164,10 @@ async def stream_chat(
 
 
 @router.delete("/history/{session_id}")
-async def clear_history(session_id: str):
+async def clear_history(
+    session_id: str,
+    current_user: UserModel = Depends(get_current_user),
+):
     """清除对话历史"""
     chat_service = get_chat_service()
     success = chat_service.clear_history(session_id)
@@ -173,7 +176,10 @@ async def clear_history(session_id: str):
 
 
 @router.get("/history/{session_id}")
-async def get_history(session_id: str):
+async def get_history(
+    session_id: str,
+    current_user: UserModel = Depends(get_current_user),
+):
     """获取对话历史"""
     chat_service = get_chat_service()
     history = chat_service.get_history(session_id)
@@ -188,7 +194,9 @@ async def get_history(session_id: str):
 
 
 @router.post("/health")
-async def chat_health_check():
+async def chat_health_check(
+    current_user: UserModel = Depends(get_current_user),
+):
     """问答服务健康检查"""
     chat_service = get_chat_service()
     health_result = await chat_service.health_check()

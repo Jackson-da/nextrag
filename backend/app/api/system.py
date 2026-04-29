@@ -71,7 +71,4 @@ async def health_check():
     )
 
 
-@router.get("/ping")
-async def ping():
-    """简单的存活探测"""
-    return {"status": "ok", "version": __version__}
+
