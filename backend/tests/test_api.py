@@ -252,6 +252,21 @@ class TestChatAPI:
         assert "status" in data
         assert "llm_connected" in data
 
+    def test_get_history_unauthorized(self, client: TestClient):
+        """测试未认证请求返回 401"""
+        response = client.get("/api/v1/chat/history/test-session")
+        assert response.status_code == 401
+
+    def test_clear_history_unauthorized(self, client: TestClient):
+        """测试未认证清除历史返回 401"""
+        response = client.delete("/api/v1/chat/history/test-session")
+        assert response.status_code == 401
+
+    def test_chat_health_check_unauthorized(self, client: TestClient):
+        """测试未认证健康检查返回 401"""
+        response = client.post("/api/v1/chat/health")
+        assert response.status_code == 401
+
 
 class TestChatWithKnowledgeBase:
     """聊天 API - 按知识库检索测试"""
