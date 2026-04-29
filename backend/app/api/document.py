@@ -9,6 +9,8 @@ from app.models.schemas import (
     UploadResponse,
     DeleteResponse,
     ErrorResponse,
+    BatchUploadResponse,
+    UploadResultItem,
 )
 from app.services.document_service import get_document_service
 from app.config import get_settings
@@ -167,3 +169,113 @@ async def get_vectorstore_info(
     info = await doc_service.get_vectorstore_info(user_id=current_user.id)
     
     return info
+
+
+@router.post("/upload/batch", response_model=BatchUploadResponse)
+async def batch_upload_documents(
+    files: Annotated[list[UploadFile], File(description="多个文档文件")],
+    knowledge_base_id: Annotated[str | None, Form(description="知识库 ID")] = None,
+    current_user: UserModel = Depends(get_current_user),
+):
+    """批量上传文档并自动处理（需要登录）"""
+    settings = get_settings()
+    
+    # 校验文件数量
+    if len(files) > settings.batch_max_files:
+        logger.warning("批量上传文件数量超限", count=len(files), max=settings.batch_max_files)
+        raise HTTPException(
+            status_code=400,
+            detail=f"单次最多上传 {settings.batch_max_files} 个文件"
+        )
+    
+    # 校验总大小
+    total_size = 0
+    for f in files:
+        if f.size:
+            total_size += f.size
+    
+    if total_size > settings.batch_max_total_size:
+        logger.warning("批量上传总大小超限", total_size=total_size, max=settings.batch_max_total_size)
+        raise HTTPException(
+            status_code=400,
+            detail=f"批量上传总大小不能超过 {settings.batch_max_total_size // (1024 * 1024)}MB"
+        )
+    
+    logger.info("批量上传请求", user_id=current_user.id, file_count=len(files), kb_id=knowledge_base_id)
+    
+    doc_service = get_document_service()
+    results: list[UploadResultItem] = []
+    success_count = 0
+    failed_count = 0
+    
+    for file in files:
+        filename = file.filename or "unknown"
+        
+        # 检查文件扩展名
+        ext = "." + filename.split(".")[-1].lower() if "." in filename else ""
+        if ext not in settings.allowed_extensions:
+            logger.warning("不支持的文件格式", filename=filename, ext=ext)
+            results.append(UploadResultItem(
+                filename=filename,
+                status="failed",
+                error=f"不支持的文件格式：{ext}"
+            ))
+            failed_count += 1
+            continue
+        
+        try:
+            # 读取文件内容
+            content = await file.read()
+            
+            # 检查单文件大小
+            if len(content) > settings.max_file_size:
+                results.append(UploadResultItem(
+                    filename=filename,
+                    status="failed",
+                    error=f"文件过大，最大支持 {settings.max_file_size // (1024 * 1024)}MB"
+                ))
+                failed_count += 1
+                continue
+            
+            # 上传处理（复用现有逻辑）
+            result = await doc_service.upload_document(
+                file_content=content,
+                filename=filename,
+                description=None,
+                knowledge_base_id=knowledge_base_id,
+                user_id=current_user.id,
+            )
+            
+            if result["status"] == "failed":
+                results.append(UploadResultItem(
+                    filename=filename,
+                    status="failed",
+                    error=result.get("error", "未知错误")
+                ))
+                failed_count += 1
+            else:
+                results.append(UploadResultItem(
+                    filename=filename,
+                    status="success",
+                    document_id=result["id"],
+                    chunk_count=result["chunk_count"]
+                ))
+                success_count += 1
+                
+        except Exception as e:
+            logger.error("文件处理异常", filename=filename, error=str(e))
+            results.append(UploadResultItem(
+                filename=filename,
+                status="failed",
+                error=f"处理异常：{str(e)}"
+            ))
+            failed_count += 1
+    
+    logger.info("批量上传完成", user_id=current_user.id, success=success_count, failed=failed_count)
+    
+    return BatchUploadResponse(
+        total=len(files),
+        success_count=success_count,
+        failed_count=failed_count,
+        results=results
+    )

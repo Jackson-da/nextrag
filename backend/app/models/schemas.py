@@ -137,3 +137,20 @@ class DeleteResponse(BaseModel):
     """删除响应"""
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="提示信息")
+
+
+class UploadResultItem(BaseModel):
+    """单个文件上传结果"""
+    filename: str = Field(..., description="文件名")
+    status: str = Field(..., description="上传状态: success/failed/duplicate")
+    document_id: str | None = Field(None, description="文档 ID（成功时返回）")
+    error: str | None = Field(None, description="错误原因（失败时返回）")
+    chunk_count: int | None = Field(None, description="分块数量（成功时返回）")
+
+
+class BatchUploadResponse(BaseModel):
+    """批量上传响应"""
+    total: int = Field(..., description="上传文件总数")
+    success_count: int = Field(..., description="成功数量")
+    failed_count: int = Field(..., description="失败数量")
+    results: list[UploadResultItem] = Field(..., description="每文件结果")

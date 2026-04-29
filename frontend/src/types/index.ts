@@ -91,3 +91,19 @@ export interface VectorStoreInfo {
   count: number
   metadata: Record<string, unknown>
 }
+
+// 批量上传
+export interface UploadResultItem {
+  filename: string
+  status: 'success' | 'failed' | 'duplicate'
+  document_id?: string
+  error?: string
+  chunk_count?: number
+}
+
+export interface BatchUploadResponse {
+  total: number
+  success_count: number
+  failed_count: number
+  results: UploadResultItem[]
+}

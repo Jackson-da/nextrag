@@ -17,6 +17,8 @@ from app.models.schemas import (
     ErrorResponse,
     UploadResponse,
     DeleteResponse,
+    UploadResultItem,
+    BatchUploadResponse,
 )
 
 
@@ -211,3 +213,128 @@ class TestResponseSchemas:
             message="删除成功"
         )
         assert delete.success is True
+
+
+class TestBatchUploadSchemas:
+    """批量上传数据模型测试"""
+
+    def test_upload_result_item_success(self):
+        """测试成功的 UploadResultItem"""
+        item = UploadResultItem(
+            filename="test.pdf",
+            status="success",
+            document_id="doc-123",
+            chunk_count=10,
+        )
+        assert item.filename == "test.pdf"
+        assert item.status == "success"
+        assert item.document_id == "doc-123"
+        assert item.chunk_count == 10
+        assert item.error is None
+
+    def test_upload_result_item_failed(self):
+        """测试失败的 UploadResultItem"""
+        item = UploadResultItem(
+            filename="bad.xyz",
+            status="failed",
+            error="不支持的文件格式：.xyz",
+        )
+        assert item.filename == "bad.xyz"
+        assert item.status == "failed"
+        assert item.error == "不支持的文件格式：.xyz"
+        assert item.document_id is None
+        assert item.chunk_count is None
+
+    def test_upload_result_item_status_must_be_specified(self):
+        """测试 status 是必填字段"""
+        with pytest.raises(ValidationError):
+            UploadResultItem(filename="test.txt")
+
+    def test_upload_result_item_filename_must_be_specified(self):
+        """测试 filename 是必填字段"""
+        with pytest.raises(ValidationError):
+            UploadResultItem(status="success")
+
+    def test_batch_upload_response_valid_all_success(self):
+        """测试全部成功的 BatchUploadResponse"""
+        response = BatchUploadResponse(
+            total=3,
+            success_count=3,
+            failed_count=0,
+            results=[
+                UploadResultItem(
+                    filename="doc1.txt",
+                    status="success",
+                    document_id="d1",
+                    chunk_count=5,
+                ),
+                UploadResultItem(
+                    filename="doc2.txt",
+                    status="success",
+                    document_id="d2",
+                    chunk_count=3,
+                ),
+                UploadResultItem(
+                    filename="doc3.txt",
+                    status="success",
+                    document_id="d3",
+                    chunk_count=8,
+                ),
+            ],
+        )
+        assert response.total == 3
+        assert response.success_count == 3
+        assert response.failed_count == 0
+        assert len(response.results) == 3
+
+    def test_batch_upload_response_partial_failure(self):
+        """测试部分失败的 BatchUploadResponse"""
+        response = BatchUploadResponse(
+            total=5,
+            success_count=3,
+            failed_count=2,
+            results=[
+                UploadResultItem(filename="doc1.txt", status="success", document_id="d1", chunk_count=2),
+                UploadResultItem(filename="bad.doc", status="failed", error="不支持的文件格式：.doc"),
+                UploadResultItem(filename="doc2.txt", status="success", document_id="d2", chunk_count=4),
+                UploadResultItem(filename="big.pdf", status="failed", error="文件过大"),
+                UploadResultItem(filename="doc3.txt", status="success", document_id="d3", chunk_count=6),
+            ],
+        )
+        assert response.total == 5
+        assert response.success_count == 3
+        assert response.failed_count == 2
+        assert len(response.results) == 5
+
+    def test_batch_upload_response_all_failed(self):
+        """测试全部失败的 BatchUploadResponse"""
+        response = BatchUploadResponse(
+            total=2,
+            success_count=0,
+            failed_count=2,
+            results=[
+                UploadResultItem(filename="a.xyz", status="failed", error="不支持的文件格式"),
+                UploadResultItem(filename="b.xyz", status="failed", error="不支持的文件格式"),
+            ],
+        )
+        assert response.total == 2
+        assert response.success_count == 0
+        assert response.failed_count == 2
+
+    def test_batch_upload_response_empty(self):
+        """测试空结果的 BatchUploadResponse"""
+        response = BatchUploadResponse(
+            total=0,
+            success_count=0,
+            failed_count=0,
+            results=[],
+        )
+        assert response.total == 0
+        assert response.success_count == 0
+        assert response.failed_count == 0
+        assert response.results == []
+
+    def test_batch_upload_response_required_fields(self):
+        """测试 BatchUploadResponse 所有字段必填"""
+        with pytest.raises(ValidationError):
+            BatchUploadResponse(total=0)  # 缺少 success_count, failed_count, results
