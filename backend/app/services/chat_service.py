@@ -350,7 +350,9 @@ class ChatService:
         self._ensure_session(session_id, user_id, kb_id)
         
         # ========== LLM 回答缓存检查 ==========
-        question_hash = hashlib.md5(question.encode()).hexdigest()
+        # 包含 user_id 和 kb_id 以支持多租户场景
+        cache_content = f"{user_id}:{kb_id}:{question}"
+        question_hash = hashlib.md5(cache_content.encode()).hexdigest()
         cache_key = CacheKeys.llm_response(question_hash)
         
         redis = await get_redis()
