@@ -358,7 +358,8 @@ const fileList = ref<{ name: string }[]>([])
 const showBatchUploadDialog = ref(false)
 const batchUploadRef = ref<UploadInstance>()
 const batchUploading = ref(false)
-const batchFileList = ref<{ name: string; size: number; status?: string }[]>([])
+type BatchFileItem = { name: string; size: number; raw?: File; status?: string }
+const batchFileList = ref<BatchFileItem[]>([])
 const batchResults = ref<Record<string, { status: string; message?: string }>>({})
 
 const uploadForm = reactive({
@@ -468,10 +469,14 @@ function handleKnowledgeBaseChange() {
 }
 
 // 批量上传相关
-function handleBatchFileChange(file: { name: string; size: number; raw?: UploadRawFile }) {
-  const exists = batchFileList.value.some((f) => f.name === file.name)
+function handleBatchFileChange(uploadFile: { name: string; size?: number; raw?: UploadRawFile }) {
+  const exists = batchFileList.value.some((f) => f.name === uploadFile.name)
   if (!exists) {
-    batchFileList.value.push({ name: file.name, size: file.size })
+    batchFileList.value.push({
+      name: uploadFile.name,
+      size: uploadFile.size ?? 0,
+      raw: uploadFile.raw as File | undefined,
+    })
   }
 }
 
@@ -483,7 +488,7 @@ function handleBatchDrop(e: DragEvent) {
       if (['.pdf', '.docx', '.doc', '.txt', '.md'].includes(ext)) {
         const exists = batchFileList.value.some((f) => f.name === file.name)
         if (!exists) {
-          batchFileList.value.push({ name: file.name, size: file.size })
+          batchFileList.value.push({ name: file.name, size: file.size, raw: file })
         }
       }
     }
@@ -512,7 +517,15 @@ async function handleBatchUpload() {
   batchResults.value = {}
 
   try {
-    const files = batchFileList.value.map((f) => f.raw as File)
+    const files = batchFileList.value
+      .map((f) => f.raw)
+      .filter((f): f is File => f instanceof File)
+
+    if (files.length === 0) {
+      ElMessage.error('没有有效的文件，请重新选择')
+      return
+    }
+
     const response = await documentApi.uploadBatch(
       files,
       batchUploadForm.knowledge_base_id || undefined

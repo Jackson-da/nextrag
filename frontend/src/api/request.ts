@@ -20,6 +20,10 @@ instance.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    // 如果是 FormData，删除 Content-Type 让浏览器自动设置 multipart/form-data + boundary
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type']
+    }
     return config
   },
   (error) => {
@@ -68,12 +72,7 @@ export const request = {
     formData: FormData,
     config?: AxiosRequestConfig
   ) {
-    return instance.post<unknown, T>(url, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      ...config,
-    })
+    return instance.post<unknown, T>(url, formData, config)
   },
 }
 
