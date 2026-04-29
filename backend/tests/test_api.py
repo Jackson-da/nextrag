@@ -355,7 +355,7 @@ class TestChatWithKnowledgeBase:
         assert response1.json()["session_id"] == "session-1"
         
         # 获取第二个会话的历史
-        response2 = client.get("/api/v1/chat/history/session-2")
+        response2 = client.get("/api/v1/chat/history/session-2", headers=auth_headers)
         assert response2.status_code == 200
         assert response2.json()["session_id"] == "session-2"
     
